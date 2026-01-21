@@ -14,20 +14,20 @@ parent_dir = Path(__file__).parent.parent.absolute()
 sys.path.insert(0, str(parent_dir.parent))  # Add parsers parent dir
 
 # Now import as package
-from parsers.models.document import RawDocument, Chunk, EnrichedChunk, ProcessedDocument
-from parsers.extractors import (
+from src.models.document import RawDocument, Chunk, EnrichedChunk, ProcessedDocument
+from src.extractors import (
     PDFExtractor, DOCXExtractor, PPTXExtractor,
     CodeExtractor, TextExtractor, MarkdownExtractor,
     ExcelExtractor, CSVExtractor, HTMLExtractor
 )
-from parsers.chunking.strategies import (
+from src.chunking.strategies import (
     PDFChunker, DOCXChunker, PPTXChunker,
     CodeChunker, TextChunker, MarkdownChunker,
     ExcelChunker, HTMLChunker
 )
-from parsers.enrichment import KeywordExtractor, SectionDetector, TitleGenerator, MetadataEnricher
-from parsers.formatters import SimpleFormatter, WeaviateFormatter, Neo4jFormatter
-from parsers.pipeline import DocumentPipeline
+from src.enrichment import KeywordExtractor, SectionDetector, TitleGenerator, MetadataEnricher
+from src.formatters import SimpleFormatter, WeaviateFormatter, Neo4jFormatter
+from src.pipeline import DocumentPipeline
 
 
 class TestResults:
@@ -657,7 +657,7 @@ def test_integration():
 
     # Test adapter
     try:
-        from parsers.integration import ParserFactoryAdapter
+        from src.integration import ParserFactoryAdapter
 
         temp_file = create_temp_file(SAMPLE_TEXT, ".txt")
         parser = ParserFactoryAdapter.create_parser(temp_file)

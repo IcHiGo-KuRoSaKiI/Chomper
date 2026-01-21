@@ -10,6 +10,8 @@ Features:
 - Chunked parsing with configurable size and overlap
 - Metadata-only extraction for quick document analysis
 - Batch processing for multiple files
+- On-demand image retrieval with get_document_images
+- Paginated content retrieval with get_document_chunk
 - Support for PDF, DOCX, PPTX, Excel, CSV, HTML, Markdown, and code files
 
 Usage:
@@ -29,6 +31,7 @@ Usage:
 import asyncio
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -76,6 +79,11 @@ logger = logging.getLogger("document-parser-mcp")
 
 # Initialize MCP server
 server = Server("document-parser")
+
+# Default constants
+DEFAULT_SUMMARY_CHARS = 5000
+DEFAULT_CHUNK_LIMIT = 5000
+DEFAULT_MAX_IMAGES = 5
 
 # Format descriptions for supported extensions
 FORMAT_DESCRIPTIONS: Dict[str, str] = {
@@ -251,12 +259,18 @@ def _get_chunker_for_file(
     return chunker_class(target_size=target_size, overlap=overlap)
 
 
-def _extract_images_from_structure(structure: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _extract_images_from_structure(
+    structure: Optional[Dict[str, Any]],
+    page_filter: Optional[int] = None,
+    max_images: Optional[int] = None
+) -> List[Dict[str, Any]]:
     """
     Extract images from PDF structure.
 
     Args:
         structure: Document structure from extraction
+        page_filter: If set, only return images from this page (1-indexed)
+        max_images: Maximum number of images to return
 
     Returns:
         List of image dictionaries with page, base64, width, height
@@ -269,6 +283,10 @@ def _extract_images_from_structure(structure: Optional[Dict[str, Any]]) -> List[
     for page in structure["pages"]:
         page_number = page.get("page_number", 0)
 
+        # Filter by page if specified
+        if page_filter is not None and page_number != page_filter:
+            continue
+
         for item in page.get("content", []):
             if item.get("type") == "image":
                 images.append({
@@ -279,24 +297,67 @@ def _extract_images_from_structure(structure: Optional[Dict[str, Any]]) -> List[
                     "position": item.get("position", {})
                 })
 
+                # Check max_images limit
+                if max_images is not None and len(images) >= max_images:
+                    return images
+
     return images
 
 
-def _format_error_response(error: Exception) -> Dict[str, Any]:
+def _remove_image_placeholders(text: str) -> str:
     """
-    Format error response.
+    Remove [Image: WxH] placeholders from text.
+
+    Args:
+        text: Text containing image placeholders
+
+    Returns:
+        Text with placeholders removed
+    """
+    # Remove patterns like [Image: 800x600], [Image: 1024x768], etc.
+    pattern = r'\[Image:\s*\d+x\d+\]\s*'
+    return re.sub(pattern, '', text)
+
+
+def _detect_mime_type(base64_data: str) -> str:
+    """
+    Detect MIME type from base64 data prefix.
+
+    Args:
+        base64_data: Base64 encoded image data
+
+    Returns:
+        MIME type string
+    """
+    if base64_data.startswith("/9j/"):
+        return "image/jpeg"
+    elif base64_data.startswith("R0lGOD"):
+        return "image/gif"
+    elif base64_data.startswith("iVBOR"):
+        return "image/png"
+    elif base64_data.startswith("UklGR"):
+        return "image/webp"
+    else:
+        # Default to PNG
+        return "image/png"
+
+
+def _format_error_response(error: Exception) -> List[TextContent]:
+    """
+    Format error response as TextContent list.
 
     Args:
         error: Exception that occurred
 
     Returns:
-        Error response dictionary
+        List with single TextContent containing error JSON
     """
-    return {
+    error_data = {
         "success": False,
         "error": str(error),
         "error_type": type(error).__name__
     }
+    return [TextContent(type="text", text=json.dumps(error_data, indent=2))]
 
 
 def _chunk_to_dict(chunk: Any) -> Dict[str, Any]:
@@ -333,132 +394,85 @@ async def list_tools() -> List[Tool]:
     return [
         Tool(
             name="parse_document",
-            description=(
-                "Parse a document and extract text, metadata, and images. "
-                "Supports PDF, DOCX, PPTX, Excel, CSV, HTML, Markdown, and code files. "
-                "For PDFs, images are extracted and returned as base64-encoded data."
-            ),
+            description="Parse a document and extract text, metadata, and images. Returns summary by default (first 5000 chars). Use full_text=true for complete content. Supports PDF, DOCX, PPTX, Excel, CSV, HTML, Markdown, and code files. Text is returned as plain text (not JSON wrapped). Images returned as ImageContent if include_images=true.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "file_path": {
-                        "type": "string",
-                        "description": "Absolute path to the document file"
-                    },
-                    "options": {
-                        "type": "object",
-                        "description": "Optional parsing options",
-                        "properties": {
-                            "include_images": {
-                                "type": "boolean",
-                                "description": "Include extracted images (default: true)",
-                                "default": True
-                            },
-                            "chunk_size": {
-                                "type": "integer",
-                                "description": "Target words per chunk (default: 300)",
-                                "default": 300
-                            },
-                            "output_format": {
-                                "type": "string",
-                                "description": "Output format: 'full' or 'summary' (default: 'full')",
-                                "enum": ["full", "summary"],
-                                "default": "full"
-                            }
-                        }
-                    }
+                    "file_path": {"type": "string", "description": "Absolute path to the document file"},
+                    "full_text": {"type": "boolean", "default": False, "description": "If true, return complete text. Default false returns first 5000 chars with continuation hint."},
+                    "include_images": {"type": "boolean", "default": False, "description": "Include extracted images as ImageContent (default: false). Use get_document_images for on-demand retrieval."}
+                },
+                "required": ["file_path"]
+            }
+        ),
+        Tool(
+            name="get_document_chunk",
+            description="Get a specific portion of document text. Use for paginated retrieval of large documents. Returns plain text content plus metadata about remaining content.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Absolute path to the document file"},
+                    "offset": {"type": "integer", "default": 0, "description": "Character offset to start from (default: 0)"},
+                    "limit": {"type": "integer", "default": 5000, "description": "Maximum characters to return (default: 5000)"}
+                },
+                "required": ["file_path"]
+            }
+        ),
+        Tool(
+            name="get_document_images",
+            description="Retrieve images from a document on-demand. Returns images as ImageContent objects. Use this instead of include_images=true on parse_document for better control.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Absolute path to the document file"},
+                    "page": {"type": "integer", "description": "Specific page number to get images from (1-indexed). Default: all pages."},
+                    "max_images": {"type": "integer", "default": 5, "description": "Maximum number of images to return (default: 5)"}
                 },
                 "required": ["file_path"]
             }
         ),
         Tool(
             name="parse_document_chunked",
-            description=(
-                "Parse a document into semantic chunks with configurable size and overlap. "
-                "Ideal for processing large documents for RAG or embedding systems."
-            ),
+            description="Parse a document into semantic chunks with configurable size and overlap. Ideal for processing large documents for RAG or embedding systems.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "file_path": {
-                        "type": "string",
-                        "description": "Absolute path to the document file"
-                    },
-                    "chunk_size": {
-                        "type": "integer",
-                        "description": "Target words per chunk (default: 1000)",
-                        "default": 1000
-                    },
-                    "overlap": {
-                        "type": "integer",
-                        "description": "Words to overlap between chunks (default: 100)",
-                        "default": 100
-                    }
+                    "file_path": {"type": "string", "description": "Absolute path to the document file"},
+                    "chunk_size": {"type": "integer", "default": 1000, "description": "Target words per chunk (default: 1000)"},
+                    "overlap": {"type": "integer", "default": 100, "description": "Words to overlap between chunks (default: 100)"}
                 },
                 "required": ["file_path"]
             }
         ),
         Tool(
             name="extract_metadata",
-            description=(
-                "Extract only metadata from a document without full processing. "
-                "Useful for quick document analysis, file type detection, and previews."
-            ),
+            description="Extract only metadata from a document without full processing. Useful for quick document analysis, file type detection, and previews.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "file_path": {
-                        "type": "string",
-                        "description": "Absolute path to the document file"
-                    }
+                    "file_path": {"type": "string", "description": "Absolute path to the document file"}
                 },
                 "required": ["file_path"]
             }
         ),
         Tool(
             name="list_supported_formats",
-            description=(
-                "List all supported document formats with their descriptions. "
-                "Returns available file extensions and format details."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {}
-            }
+            description="List all supported document formats with their descriptions. Returns available file extensions and format details.",
+            inputSchema={"type": "object", "properties": {}}
         ),
         Tool(
             name="batch_parse",
-            description=(
-                "Parse multiple documents in a single request. "
-                "Efficiently processes batches of files with shared options."
-            ),
+            description="Parse multiple documents in a single request. Efficiently processes batches of files with shared options.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "file_paths": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Array of absolute paths to document files"
-                    },
+                    "file_paths": {"type": "array", "items": {"type": "string"}, "description": "Array of absolute paths to document files"},
                     "options": {
                         "type": "object",
-                        "description": "Optional parsing options applied to all files",
+                        "description": "Parsing options for all files",
                         "properties": {
-                            "include_images": {
-                                "type": "boolean",
-                                "description": "Include extracted images (default: false for batch)",
-                                "default": False
-                            },
-                            "chunk_size": {
-                                "type": "integer",
-                                "description": "Target words per chunk (default: 300)",
-                                "default": 300
-                            },
-                            "continue_on_error": {
-                                "type": "boolean",
-                                "description": "Continue processing if a file fails (default: true)",
-                                "default": True
-                            }
+                            "include_images": {"type": "boolean", "default": False, "description": "Include images (default: false)"},
+                            "continue_on_error": {"type": "boolean", "default": True, "description": "Continue if a file fails (default: true)"}
                         }
                     }
                 },
@@ -479,152 +493,335 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> Sequence[TextConten
 
     Returns:
         List of TextContent and ImageContent with results.
-        Images are returned as separate ImageContent items that Claude can analyze directly.
     """
     try:
         if name == "parse_document":
-            result = await _handle_parse_document(arguments)
+            return await _handle_parse_document(arguments)
+        elif name == "get_document_chunk":
+            return await _handle_get_document_chunk(arguments)
+        elif name == "get_document_images":
+            return await _handle_get_document_images(arguments)
         elif name == "parse_document_chunked":
-            result = await _handle_parse_document_chunked(arguments)
+            return await _handle_parse_document_chunked(arguments)
         elif name == "extract_metadata":
-            result = await _handle_extract_metadata(arguments)
+            return await _handle_extract_metadata(arguments)
         elif name == "list_supported_formats":
-            result = await _handle_list_supported_formats(arguments)
+            return await _handle_list_supported_formats(arguments)
         elif name == "batch_parse":
-            result = await _handle_batch_parse(arguments)
+            return await _handle_batch_parse(arguments)
         else:
-            result = _format_error_response(ValueError(f"Unknown tool: {name}"))
-
-        # Build response with TextContent and optional ImageContent
-        response_items: List[TextContent | ImageContent] = []
-
-        # Extract images for direct Claude analysis (parse_document only)
-        images_for_claude = []
-        if name == "parse_document" and result.get("success") and result.get("images"):
-            images_for_claude = result.get("images", [])
-            # Create image reference in JSON (without base64 to reduce size)
-            result["images"] = [
-                {
-                    "page": img.get("page"),
-                    "width": img.get("width"),
-                    "height": img.get("height"),
-                    "position": img.get("position"),
-                    "content_index": idx + 1  # Reference to ImageContent index
-                }
-                for idx, img in enumerate(images_for_claude)
-            ]
-            result["image_note"] = "Images are returned as separate ImageContent items for direct analysis"
-
-        # Add main JSON response
-        response_items.append(TextContent(
-            type="text",
-            text=json.dumps(result, indent=2, default=str)
-        ))
-
-        # Add images as ImageContent for Claude to analyze directly
-        for img in images_for_claude:
-            base64_data = img.get("base64", "")
-            if base64_data:
-                # Determine MIME type (default to PNG)
-                mime_type = "image/png"
-                if base64_data.startswith("/9j/"):
-                    mime_type = "image/jpeg"
-                elif base64_data.startswith("R0lGOD"):
-                    mime_type = "image/gif"
-
-                response_items.append(ImageContent(
-                    type="image",
-                    data=base64_data,
-                    mimeType=mime_type,
-                ))
-
-        return response_items
+            return _format_error_response(ValueError(f"Unknown tool: {name}"))
 
     except Exception as e:
         logger.exception(f"Error in tool {name}")
-        return [TextContent(
-            type="text",
-            text=json.dumps(_format_error_response(e), indent=2)
-        )]
+        return _format_error_response(e)
 
 
-async def _handle_parse_document(arguments: Dict[str, Any]) -> Dict[str, Any]:
+async def _handle_parse_document(arguments: Dict[str, Any]) -> List[TextContent | ImageContent]:
     """
     Handle parse_document tool call.
+
+    Returns:
+    - TextContent[0]: Plain extracted text (no JSON wrapping)
+    - TextContent[1]: Metadata as JSON
+    - ImageContent[]: Each image as separate ImageContent (if include_images=true)
 
     Args:
         arguments: Tool arguments
 
     Returns:
-        Parsed document result
+        List of TextContent and ImageContent
     """
     file_path_str = arguments.get("file_path")
-    options = arguments.get("options", {})
-
-    include_images = options.get("include_images", True)
-    _chunk_size = options.get("chunk_size", 300)  # Reserved for future custom chunking
-    output_format = options.get("output_format", "full")
+    full_text = arguments.get("full_text", False)
+    include_images = arguments.get("include_images", False)
 
     # Validate path
     file_path = _validate_file_path(file_path_str)
 
-    logger.info(f"Parsing document: {file_path}")
+    logger.info(f"Parsing document: {file_path} (full_text={full_text}, include_images={include_images})")
 
-    # Create pipeline with custom chunk size
-    pipeline = DocumentPipeline(
-        formatter=SimpleFormatter(include_metadata=True),
-        skip_enrichment_for_code=True
-    )
-
-    # Check if supported
-    if not pipeline.is_supported(str(file_path)):
-        raise ValueError(f"Unsupported file format: {file_path.suffix}")
-
-    # Process document
-    result = pipeline.process(str(file_path))
-
-    # Extract text from raw document for full text
+    # Get extractor
     extractor = _get_extractor_for_file(file_path)
+
+    # Extract raw document
     raw_doc = extractor.extract(str(file_path))
 
-    # Build response
-    response: Dict[str, Any] = {
-        "success": True,
+    # Clean text by removing image placeholders
+    clean_text = _remove_image_placeholders(raw_doc.text)
+    total_chars = len(clean_text)
+
+    # Build response content list
+    response_items: List[TextContent | ImageContent] = []
+
+    # Determine text to return
+    if full_text or total_chars <= DEFAULT_SUMMARY_CHARS:
+        text_content = clean_text
+        continuation_hint = None
+    else:
+        text_content = clean_text[:DEFAULT_SUMMARY_CHARS]
+        remaining_chars = total_chars - DEFAULT_SUMMARY_CHARS
+        continuation_hint = (
+            f"Document has {remaining_chars} more characters. "
+            f"Use get_document_chunk(file_path, offset={DEFAULT_SUMMARY_CHARS}) for more."
+        )
+
+    # TextContent[0]: Plain extracted text
+    response_items.append(TextContent(type="text", text=text_content))
+
+    # Build metadata
+    metadata_dict: Dict[str, Any] = {
         "file_path": str(file_path),
-        "text": raw_doc.text,
-        "metadata": raw_doc.metadata,
+        "total_characters": total_chars,
+        "total_words": len(clean_text.split()),
+        "document_metadata": raw_doc.metadata,
     }
 
-    # Add images if requested and available (PDF)
+    # Add continuation hint if applicable
+    if continuation_hint:
+        metadata_dict["continuation_hint"] = continuation_hint
+
+    # Add page/image count for PDFs
+    extension = file_path.suffix.lower()
+    if extension == ".pdf" and raw_doc.structure:
+        pages = raw_doc.structure.get("pages", [])
+        image_count = sum(
+            1 for page in pages
+            for item in page.get("content", [])
+            if item.get("type") == "image"
+        )
+        metadata_dict["page_count"] = len(pages)
+        metadata_dict["image_count"] = image_count
+        if image_count > 0 and not include_images:
+            metadata_dict["images_hint"] = (
+                f"Document contains {image_count} images. "
+                f"Use get_document_images(file_path) to retrieve them."
+            )
+
+    # TextContent[1]: Metadata as JSON
+    response_items.append(TextContent(type="text", text=json.dumps(metadata_dict, indent=2, default=str)))
+
+    # Add images if requested
     if include_images:
-        images = _extract_images_from_structure(raw_doc.structure)
-        if images:
-            response["images"] = images
-            response["image_count"] = len(images)
+        images = _extract_images_from_structure(raw_doc.structure, max_images=DEFAULT_MAX_IMAGES)
 
-    # Add chunks
-    if output_format == "full":
-        response["chunks"] = result.get("chunks", [])
-        response["total_chunks"] = result.get("total_chunks", 0)
-        response["total_words"] = result.get("total_words", 0)
-    else:
-        # Summary mode - just chunk count and metadata
-        response["total_chunks"] = result.get("total_chunks", 0)
-        response["total_words"] = result.get("total_words", 0)
-        response["chunk_preview"] = result.get("chunks", [])[:3] if result.get("chunks") else []
+        for idx, img in enumerate(images):
+            page_num = img.get("page", 0)
+            width = img.get("width", 0)
+            height = img.get("height", 0)
+            position = img.get("position", {})
 
-    # Add pagination info for large documents
-    if len(raw_doc.text) > 100000:
-        response["pagination"] = {
-            "total_characters": len(raw_doc.text),
-            "is_large_document": True,
-            "recommendation": "Consider using parse_document_chunked for better handling"
+            # Add image position info as TextContent
+            position_info = {
+                "image_index": idx + 1,
+                "page": page_num,
+                "dimensions": f"{width}x{height}",
+                "position": position
+            }
+            response_items.append(TextContent(
+                type="text",
+                text=f"Image {idx + 1} info: {json.dumps(position_info)}"
+            ))
+
+            # Add actual image as ImageContent
+            base64_data = img.get("base64", "")
+            if base64_data:
+                mime_type = _detect_mime_type(base64_data)
+                response_items.append(ImageContent(
+                    type="image",
+                    data=base64_data,
+                    mimeType=mime_type
+                ))
+
+        # Note if there are more images
+        total_images = len(_extract_images_from_structure(raw_doc.structure))
+        if total_images > len(images):
+            response_items.append(TextContent(
+                type="text",
+                text=f"Showing {len(images)} of {total_images} images. Use get_document_images for more."
+            ))
+
+    return response_items
+
+
+async def _handle_get_document_chunk(arguments: Dict[str, Any]) -> List[TextContent]:
+    """
+    Handle get_document_chunk tool call for paginated content retrieval.
+
+    Args:
+        arguments: Tool arguments
+
+    Returns:
+        List with TextContent containing the chunk and metadata
+    """
+    file_path_str = arguments.get("file_path")
+    offset = arguments.get("offset", 0)
+    limit = arguments.get("limit", DEFAULT_CHUNK_LIMIT)
+
+    # Validate path
+    file_path = _validate_file_path(file_path_str)
+
+    logger.info(f"Getting document chunk: {file_path} (offset={offset}, limit={limit})")
+
+    # Get extractor
+    extractor = _get_extractor_for_file(file_path)
+
+    # Extract raw document
+    raw_doc = extractor.extract(str(file_path))
+
+    # Clean text
+    clean_text = _remove_image_placeholders(raw_doc.text)
+    total_chars = len(clean_text)
+
+    # Validate offset
+    if offset >= total_chars:
+        return [
+            TextContent(type="text", text=""),
+            TextContent(type="text", text=json.dumps({
+                "file_path": str(file_path),
+                "offset": offset,
+                "limit": limit,
+                "returned_chars": 0,
+                "total_chars": total_chars,
+                "remaining_chars": 0,
+                "has_more": False,
+                "error": f"Offset {offset} exceeds document length {total_chars}"
+            }, indent=2))
+        ]
+
+    # Extract chunk
+    end_pos = min(offset + limit, total_chars)
+    chunk_text = clean_text[offset:end_pos]
+    remaining = total_chars - end_pos
+
+    # Build response
+    response_items: List[TextContent] = []
+
+    # TextContent[0]: The text chunk
+    response_items.append(TextContent(type="text", text=chunk_text))
+
+    # TextContent[1]: Metadata about the chunk
+    chunk_metadata = {
+        "file_path": str(file_path),
+        "offset": offset,
+        "limit": limit,
+        "returned_chars": len(chunk_text),
+        "total_chars": total_chars,
+        "remaining_chars": remaining,
+        "has_more": remaining > 0
+    }
+
+    if remaining > 0:
+        chunk_metadata["next_chunk_hint"] = (
+            f"Use get_document_chunk(file_path, offset={end_pos}, limit={limit}) "
+            f"to get next {min(remaining, limit)} of {remaining} remaining characters."
+        )
+
+    response_items.append(TextContent(type="text", text=json.dumps(chunk_metadata, indent=2)))
+
+    return response_items
+
+
+async def _handle_get_document_images(arguments: Dict[str, Any]) -> List[TextContent | ImageContent]:
+    """
+    Handle get_document_images tool call for on-demand image retrieval.
+
+    Args:
+        arguments: Tool arguments
+
+    Returns:
+        List of TextContent (position info) and ImageContent (actual images)
+    """
+    file_path_str = arguments.get("file_path")
+    page_filter = arguments.get("page")  # Optional, 1-indexed
+    max_images = arguments.get("max_images", DEFAULT_MAX_IMAGES)
+
+    # Validate path
+    file_path = _validate_file_path(file_path_str)
+
+    logger.info(f"Getting document images: {file_path} (page={page_filter}, max={max_images})")
+
+    # Get extractor
+    extractor = _get_extractor_for_file(file_path)
+
+    # Extract raw document
+    raw_doc = extractor.extract(str(file_path))
+
+    # Get all images first to count total
+    all_images = _extract_images_from_structure(raw_doc.structure)
+    total_images = len(all_images)
+
+    if total_images == 0:
+        return [TextContent(
+            type="text",
+            text=json.dumps({
+                "file_path": str(file_path),
+                "total_images": 0,
+                "returned_images": 0,
+                "message": "No images found in document"
+            }, indent=2)
+        )]
+
+    # Get filtered images
+    images = _extract_images_from_structure(
+        raw_doc.structure,
+        page_filter=page_filter,
+        max_images=max_images
+    )
+
+    # Build response
+    response_items: List[TextContent | ImageContent] = []
+
+    # Summary metadata
+    summary = {
+        "file_path": str(file_path),
+        "total_images_in_document": total_images,
+        "returned_images": len(images),
+        "page_filter": page_filter,
+        "max_images": max_images
+    }
+
+    if len(images) < total_images:
+        if page_filter:
+            summary["note"] = f"Showing images from page {page_filter} only"
+        else:
+            summary["note"] = f"Showing first {len(images)} of {total_images} images"
+
+    response_items.append(TextContent(type="text", text=json.dumps(summary, indent=2)))
+
+    # Add each image with position info
+    for idx, img in enumerate(images):
+        page_num = img.get("page", 0)
+        width = img.get("width", 0)
+        height = img.get("height", 0)
+        position = img.get("position", {})
+
+        # Position info as TextContent
+        position_info = {
+            "image_index": idx + 1,
+            "page": page_num,
+            "dimensions": f"{width}x{height}",
+            "position": position
         }
+        response_items.append(TextContent(
+            type="text",
+            text=f"Image {idx + 1}: {json.dumps(position_info)}"
+        ))
 
-    return response
+        # Actual image as ImageContent
+        base64_data = img.get("base64", "")
+        if base64_data:
+            mime_type = _detect_mime_type(base64_data)
+            response_items.append(ImageContent(
+                type="image",
+                data=base64_data,
+                mimeType=mime_type
+            ))
+
+    return response_items
 
 
-async def _handle_parse_document_chunked(arguments: Dict[str, Any]) -> Dict[str, Any]:
+async def _handle_parse_document_chunked(arguments: Dict[str, Any]) -> List[TextContent]:
     """
     Handle parse_document_chunked tool call.
 
@@ -632,7 +829,7 @@ async def _handle_parse_document_chunked(arguments: Dict[str, Any]) -> Dict[str,
         arguments: Tool arguments
 
     Returns:
-        Chunked document result
+        List with TextContent containing chunked document result as JSON
     """
     file_path_str = arguments.get("file_path")
     chunk_size = arguments.get("chunk_size", 1000)
@@ -674,10 +871,10 @@ async def _handle_parse_document_chunked(arguments: Dict[str, Any]) -> Dict[str,
         "total_characters": len(raw_doc.text),
     }
 
-    return response
+    return [TextContent(type="text", text=json.dumps(response, indent=2, default=str))]
 
 
-async def _handle_extract_metadata(arguments: Dict[str, Any]) -> Dict[str, Any]:
+async def _handle_extract_metadata(arguments: Dict[str, Any]) -> List[TextContent]:
     """
     Handle extract_metadata tool call.
 
@@ -685,7 +882,7 @@ async def _handle_extract_metadata(arguments: Dict[str, Any]) -> Dict[str, Any]:
         arguments: Tool arguments
 
     Returns:
-        Document metadata
+        List with TextContent containing document metadata as JSON
     """
     file_path_str = arguments.get("file_path")
 
@@ -724,10 +921,10 @@ async def _handle_extract_metadata(arguments: Dict[str, Any]) -> Dict[str, Any]:
         response["document_info"]["page_count"] = len(pages)
         response["document_info"]["image_count"] = image_count
 
-    return response
+    return [TextContent(type="text", text=json.dumps(response, indent=2, default=str))]
 
 
-async def _handle_list_supported_formats(_arguments: Dict[str, Any]) -> Dict[str, Any]:
+async def _handle_list_supported_formats(_arguments: Dict[str, Any]) -> List[TextContent]:
     """
     Handle list_supported_formats tool call.
 
@@ -735,7 +932,7 @@ async def _handle_list_supported_formats(_arguments: Dict[str, Any]) -> Dict[str
         arguments: Tool arguments
 
     Returns:
-        List of supported formats
+        List with TextContent containing supported formats as JSON
     """
     # Build format list with availability status
     formats = []
@@ -764,7 +961,7 @@ async def _handle_list_supported_formats(_arguments: Dict[str, Any]) -> Dict[str
             f for f in formats if f["extension"] in extensions
         ]
 
-    return {
+    result = {
         "success": True,
         "total_formats": len(FORMAT_DESCRIPTIONS),
         "available_formats": len(EXTRACTORS),
@@ -772,8 +969,10 @@ async def _handle_list_supported_formats(_arguments: Dict[str, Any]) -> Dict[str
         "by_category": categorized
     }
 
+    return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
-async def _handle_batch_parse(arguments: Dict[str, Any]) -> Dict[str, Any]:
+
+async def _handle_batch_parse(arguments: Dict[str, Any]) -> List[TextContent]:
     """
     Handle batch_parse tool call.
 
@@ -781,13 +980,12 @@ async def _handle_batch_parse(arguments: Dict[str, Any]) -> Dict[str, Any]:
         arguments: Tool arguments
 
     Returns:
-        Batch parsing results
+        List with TextContent containing batch parsing results as JSON
     """
     file_paths = arguments.get("file_paths", [])
     options = arguments.get("options", {})
 
     include_images = options.get("include_images", False)
-    chunk_size = options.get("chunk_size", 300)
     continue_on_error = options.get("continue_on_error", True)
 
     if not file_paths:
@@ -801,15 +999,32 @@ async def _handle_batch_parse(arguments: Dict[str, Any]) -> Dict[str, Any]:
 
     for file_path_str in file_paths:
         try:
-            # Parse each document
-            doc_result = await _handle_parse_document({
-                "file_path": file_path_str,
-                "options": {
-                    "include_images": include_images,
-                    "chunk_size": chunk_size,
-                    "output_format": "summary"  # Use summary for batch
-                }
-            })
+            # Validate path
+            file_path = _validate_file_path(file_path_str)
+
+            # Get extractor
+            extractor = _get_extractor_for_file(file_path)
+
+            # Extract raw document
+            raw_doc = extractor.extract(str(file_path))
+
+            # Clean text
+            clean_text = _remove_image_placeholders(raw_doc.text)
+
+            # Build summary result
+            doc_result: Dict[str, Any] = {
+                "success": True,
+                "file_path": str(file_path),
+                "text_preview": clean_text[:500] + "..." if len(clean_text) > 500 else clean_text,
+                "total_characters": len(clean_text),
+                "total_words": len(clean_text.split()),
+                "metadata": raw_doc.metadata
+            }
+
+            # Add image info if requested
+            if include_images:
+                images = _extract_images_from_structure(raw_doc.structure)
+                doc_result["image_count"] = len(images)
 
             results.append(doc_result)
             successful += 1
@@ -828,13 +1043,15 @@ async def _handle_batch_parse(arguments: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 raise
 
-    return {
+    result = {
         "success": True,
         "total_files": len(file_paths),
         "successful": successful,
         "failed": failed,
         "results": results
     }
+
+    return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
 
 
 async def main() -> None:
