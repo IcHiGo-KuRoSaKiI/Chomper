@@ -7,7 +7,7 @@ name = "document-parser-mcp"
 version = "1.0.0"
 description = "MCP Server for multi-format document parsing with text, metadata, and image extraction"
 readme = "README.md"
-license = "Proprietary"
+license = "MIT"
 requires-python = ">=3.10"
 authors = [
     { name = "Ichigo" }
@@ -27,7 +27,7 @@ keywords = [
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: Other/Proprietary License",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -69,9 +69,10 @@ minimal = [
 document-parser-mcp = "server:main"
 
 [project.urls]
-Homepage = "https://github.com/Ichigo/Parser-MCP"
-Documentation = "https://github.com/Ichigo/Parser-MCP#readme"
-Repository = "https://github.com/Ichigo/Parser-MCP"
+Homepage = "https://github.com/IcHiGo-KuRoSaKiI/parser-mcp"
+Documentation = "https://github.com/IcHiGo-KuRoSaKiI/parser-mcp#readme"
+Repository = "https://github.com/IcHiGo-KuRoSaKiI/parser-mcp"
+Issues = "https://github.com/IcHiGo-KuRoSaKiI/parser-mcp/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src", "server.py"]

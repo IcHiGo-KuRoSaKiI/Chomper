@@ -1,5 +1,9 @@
 # Document Parser MCP Server
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/)
+
 A production-ready [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that exposes multi-format document parsing capabilities to AI systems like Claude.
 
 ## Features
@@ -376,6 +380,34 @@ ruff check .
 | Cloud Required | No (local) | Yes | No | Optional |
 | Cost | Free | Paid | Free | Freemium |
 
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+### Quick Start for Contributors
+
+```bash
+# Fork and clone
+git clone https://github.com/YOUR_USERNAME/parser-mcp.git
+cd parser-mcp
+
+# Setup dev environment
+python -m venv venv
+source venv/bin/activate
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+
+# Format code
+black .
+ruff check .
+```
+
 ## License
 
-MIT
+MIT License - see [LICENSE](LICENSE) for details.
+
+---
+
+Built with care by [@IcHiGo-KuRoSaKiI](https://github.com/IcHiGo-KuRoSaKiI)
