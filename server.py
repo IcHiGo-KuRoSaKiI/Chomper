@@ -42,6 +42,10 @@ from mcp.types import (
     TextContent,
     ImageContent,
     Tool,
+    Prompt,
+    PromptArgument,
+    PromptMessage,
+    GetPromptResult,
 )
 
 # Add parsers to path if needed
@@ -49,6 +53,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from src import DocumentPipeline, SimpleFormatter
 from src.formatters.toon_formatter import TOONFormatter
+from src.prompts import PROMPTS, format_prompt
 from src.extractors import (
     PDFExtractor,
     DOCXExtractor,
@@ -59,6 +64,13 @@ from src.extractors import (
     ExcelExtractor,
     CSVExtractor,
     HTMLExtractor,
+    JSONExtractor,
+    YAMLExtractor,
+    XMLExtractor,
+    EMLExtractor,
+    MSGExtractor,
+    EPUBExtractor,
+    RTFExtractor,
 )
 from src.chunking.strategies import (
     PDFChunker,
@@ -69,6 +81,7 @@ from src.chunking.strategies import (
     MarkdownChunker,
     ExcelChunker,
     HTMLChunker,
+    SemanticChunker,
 )
 
 # Configure logging
@@ -121,6 +134,14 @@ FORMAT_DESCRIPTIONS: Dict[str, str] = {
     ".c": "C source code",
     ".go": "Go source code",
     ".rs": "Rust source code",
+    ".json": "JSON data files",
+    ".yaml": "YAML configuration/data files",
+    ".yml": "YAML configuration/data files",
+    ".xml": "XML documents",
+    ".eml": "Email messages (RFC 822 format)",
+    ".msg": "Outlook email messages",
+    ".epub": "EPUB e-books",
+    ".rtf": "Rich Text Format documents",
 }
 
 # Extractor mapping by extension
@@ -183,6 +204,37 @@ def _initialize_extractors() -> None:
         EXTRACTORS[".htm"] = HTMLExtractor
         CHUNKERS[".html"] = HTMLChunker
         CHUNKERS[".htm"] = HTMLChunker
+
+    # Data formats (JSON always available)
+    EXTRACTORS[".json"] = JSONExtractor
+    CHUNKERS[".json"] = TextChunker  # Use text chunker for data files
+
+    if YAMLExtractor is not None:
+        EXTRACTORS[".yaml"] = YAMLExtractor
+        EXTRACTORS[".yml"] = YAMLExtractor
+        CHUNKERS[".yaml"] = TextChunker
+        CHUNKERS[".yml"] = TextChunker
+
+    if XMLExtractor is not None:
+        EXTRACTORS[".xml"] = XMLExtractor
+        CHUNKERS[".xml"] = TextChunker
+
+    # Email formats (EML always available via stdlib)
+    EXTRACTORS[".eml"] = EMLExtractor
+    CHUNKERS[".eml"] = TextChunker
+
+    if MSGExtractor is not None:
+        EXTRACTORS[".msg"] = MSGExtractor
+        CHUNKERS[".msg"] = TextChunker
+
+    # E-book and document formats
+    if EPUBExtractor is not None:
+        EXTRACTORS[".epub"] = EPUBExtractor
+        CHUNKERS[".epub"] = TextChunker
+
+    if RTFExtractor is not None:
+        EXTRACTORS[".rtf"] = RTFExtractor
+        CHUNKERS[".rtf"] = TextChunker
 
 
 # Initialize on module load
@@ -448,6 +500,8 @@ async def list_tools() -> List[Tool]:
                     "file_path": {"type": "string", "description": "Absolute path to the document file"},
                     "chunk_size": {"type": "integer", "default": 1000, "description": "Target words per chunk (default: 1000)"},
                     "overlap": {"type": "integer", "default": 100, "description": "Words to overlap between chunks (default: 100)"},
+                    "chunking_strategy": {"type": "string", "enum": ["auto", "semantic", "fixed", "recursive"], "default": "auto", "description": "Chunking strategy: 'auto' (format-aware), 'semantic' (embedding-based for RAG), 'fixed' (character count), 'recursive' (paragraph/sentence)"},
+                    "embedding_model": {"type": "string", "enum": ["fast", "balanced"], "default": "fast", "description": "Embedding model for semantic chunking: 'fast' (~80MB) or 'balanced' (~420MB, better quality)"},
                     "output_format": {"type": "string", "enum": ["json", "toon"], "default": "json", "description": "Output format: 'json' (default) or 'toon' (token-optimized)"}
                 },
                 "required": ["file_path"]
@@ -490,6 +544,96 @@ async def list_tools() -> List[Tool]:
             }
         )
     ]
+
+
+# ============================================================================
+# MCP Prompts
+# ============================================================================
+
+@server.list_prompts()
+async def list_prompts() -> List[Prompt]:
+    """
+    List available document analysis prompts.
+
+    Returns:
+        List of Prompt definitions
+    """
+    prompts = []
+    for name, prompt_def in PROMPTS.items():
+        arguments = [
+            PromptArgument(
+                name=arg["name"],
+                description=arg.get("description", ""),
+                required=arg.get("required", False)
+            )
+            for arg in prompt_def.get("arguments", [])
+        ]
+        prompts.append(
+            Prompt(
+                name=prompt_def["name"],
+                description=prompt_def["description"],
+                arguments=arguments
+            )
+        )
+    return prompts
+
+
+@server.get_prompt()
+async def get_prompt(name: str, arguments: Dict[str, str] | None = None) -> GetPromptResult:
+    """
+    Get a specific prompt with document content filled in.
+
+    Args:
+        name: Prompt name
+        arguments: Prompt arguments including file_path
+
+    Returns:
+        GetPromptResult with formatted prompt messages
+    """
+    if name not in PROMPTS:
+        raise ValueError(f"Unknown prompt: {name}. Available: {list(PROMPTS.keys())}")
+
+    arguments = arguments or {}
+
+    # Get file_path (required for all document prompts)
+    file_path_str = arguments.get("file_path")
+    if not file_path_str:
+        raise ValueError("file_path is required for document prompts")
+
+    # Validate and parse document
+    file_path = _validate_file_path(file_path_str)
+    extractor = _get_extractor_for_file(file_path)
+    raw_doc = extractor.extract(str(file_path))
+
+    # Get document info
+    doc_type = file_path.suffix.lower().lstrip('.')
+    word_count = len(raw_doc.text.split())
+
+    # Truncate very long documents for prompt context
+    max_prompt_chars = 50000  # Reasonable limit for prompt context
+    document_content = raw_doc.text
+    if len(document_content) > max_prompt_chars:
+        document_content = document_content[:max_prompt_chars] + f"\n\n[... truncated, {len(raw_doc.text) - max_prompt_chars} more characters ...]"
+
+    # Format the prompt
+    formatted_prompt = format_prompt(
+        name=name,
+        document_content=document_content,
+        file_name=file_path.name,
+        doc_type=doc_type,
+        word_count=word_count,
+        **{k: v for k, v in arguments.items() if k != "file_path"}
+    )
+
+    return GetPromptResult(
+        description=f"Document analysis prompt: {PROMPTS[name]['description']}",
+        messages=[
+            PromptMessage(
+                role="user",
+                content=TextContent(type="text", text=formatted_prompt)
+            )
+        ]
+    )
 
 
 @server.call_tool()
@@ -897,21 +1041,43 @@ async def _handle_parse_document_chunked(arguments: Dict[str, Any]) -> List[Text
     file_path_str = arguments.get("file_path")
     chunk_size = arguments.get("chunk_size", 1000)
     overlap = arguments.get("overlap", 100)
+    chunking_strategy = arguments.get("chunking_strategy", "auto")
+    embedding_model = arguments.get("embedding_model", "fast")
     output_format = arguments.get("output_format", DEFAULT_OUTPUT_FORMAT)
 
     # Validate path
     file_path = _validate_file_path(file_path_str)
 
-    logger.info(f"Parsing document chunked: {file_path} (size={chunk_size}, overlap={overlap})")
+    logger.info(f"Parsing document chunked: {file_path} (size={chunk_size}, overlap={overlap}, strategy={chunking_strategy})")
 
-    # Get extractor and chunker
+    # Get extractor
     extractor = _get_extractor_for_file(file_path)
 
     # Extract raw document
     raw_doc = extractor.extract(str(file_path))
 
-    # Get custom chunker with specified parameters
-    chunker = _get_chunker_for_file(file_path, target_size=chunk_size, overlap=overlap)
+    # Get chunker based on strategy
+    if chunking_strategy == "semantic":
+        # Use semantic chunker with embeddings
+        if SemanticChunker is None:
+            raise ValueError(
+                "Semantic chunking requires sentence-transformers. "
+                "Install with: pip install sentence-transformers"
+            )
+        chunker = SemanticChunker(
+            target_size=chunk_size,
+            overlap=overlap,
+            model=embedding_model
+        )
+    elif chunking_strategy == "fixed":
+        # Simple fixed-size chunking using TextChunker
+        chunker = TextChunker(target_size=chunk_size, overlap=overlap)
+    elif chunking_strategy == "recursive":
+        # Recursive paragraph/sentence chunking
+        chunker = TextChunker(target_size=chunk_size, overlap=overlap)
+    else:
+        # Auto: use format-aware chunker
+        chunker = _get_chunker_for_file(file_path, target_size=chunk_size, overlap=overlap)
 
     # Chunk document
     chunks = chunker.chunk(raw_doc)
@@ -966,6 +1132,7 @@ async def _handle_parse_document_chunked(arguments: Dict[str, Any]) -> List[Text
         "file_path": str(file_path),
         "chunk_size": chunk_size,
         "overlap": overlap,
+        "chunking_strategy": chunking_strategy,
         "total_chunks": len(chunks),
         "chunks": [_chunk_to_dict(chunk) for chunk in chunks],
         "metadata": raw_doc.metadata,
@@ -976,6 +1143,9 @@ async def _handle_parse_document_chunked(arguments: Dict[str, Any]) -> List[Text
         "average_chunk_words": total_words // len(chunks) if chunks else 0,
         "total_characters": total_chars,
     }
+
+    if chunking_strategy == "semantic":
+        response["embedding_model"] = embedding_model
 
     return [TextContent(type="text", text=json.dumps(response, indent=2, default=str))]
 

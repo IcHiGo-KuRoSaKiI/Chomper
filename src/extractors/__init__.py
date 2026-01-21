@@ -5,6 +5,27 @@ from .code_extractor import CodeExtractor
 from .text_extractor import TextExtractor
 from .markdown_extractor import MarkdownExtractor
 
+# Data formats (JSON always available, YAML/XML optional)
+from .data_extractor import JSONExtractor
+
+try:
+    from .data_extractor import YAMLExtractor
+except ImportError:
+    YAMLExtractor = None
+
+try:
+    from .data_extractor import XMLExtractor
+except ImportError:
+    XMLExtractor = None
+
+# Email formats (EML always available via stdlib)
+from .email_extractor import EMLExtractor
+
+try:
+    from .email_extractor import MSGExtractor
+except ImportError:
+    MSGExtractor = None
+
 # Optional heavy dependencies
 try:
     from .pdf_extractor import PDFExtractor
@@ -36,6 +57,16 @@ try:
 except ImportError:
     HTMLExtractor = None
 
+try:
+    from .epub_extractor import EPUBExtractor
+except ImportError:
+    EPUBExtractor = None
+
+try:
+    from .rtf_extractor import RTFExtractor
+except ImportError:
+    RTFExtractor = None
+
 __all__ = [
     "BaseExtractor",
     "PDFExtractor",
@@ -46,5 +77,12 @@ __all__ = [
     "MarkdownExtractor",
     "ExcelExtractor",
     "CSVExtractor",
-    "HTMLExtractor"
+    "HTMLExtractor",
+    "JSONExtractor",
+    "YAMLExtractor",
+    "XMLExtractor",
+    "EMLExtractor",
+    "MSGExtractor",
+    "EPUBExtractor",
+    "RTFExtractor",
 ]

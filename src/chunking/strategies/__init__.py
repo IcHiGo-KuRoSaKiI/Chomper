@@ -9,6 +9,12 @@ from .markdown_chunker import MarkdownChunker
 from .excel_chunker import ExcelChunker
 from .html_chunker import HTMLChunker
 
+# Semantic chunker (requires sentence-transformers, lazy-loaded)
+try:
+    from .semantic_chunker import SemanticChunker
+except ImportError:
+    SemanticChunker = None
+
 __all__ = [
     "PDFChunker",
     "DOCXChunker",
@@ -17,5 +23,6 @@ __all__ = [
     "TextChunker",
     "MarkdownChunker",
     "ExcelChunker",
-    "HTMLChunker"
+    "HTMLChunker",
+    "SemanticChunker",
 ]
