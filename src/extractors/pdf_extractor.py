@@ -1,7 +1,8 @@
 """
-PDF extractor using PyMuPDF.
+PDF extractor using PyMuPDF and PyMuPDF4LLM.
 
-Extracts text, images, and layout from PDF documents.
+Extracts text (with proper Markdown formatting including tables),
+images, and layout from PDF documents.
 """
 import fitz
 from typing import Dict, Any, List
@@ -12,6 +13,13 @@ import logging
 from .base import BaseExtractor
 from ..models.document import RawDocument
 
+# Try to import pymupdf4llm for better markdown output
+try:
+    import pymupdf4llm
+    PYMUPDF4LLM_AVAILABLE = True
+except ImportError:
+    PYMUPDF4LLM_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -20,9 +28,10 @@ class PDFExtractor(BaseExtractor):
     Extract content from PDF files.
 
     Features:
-    - Text extraction with position (X/Y coordinates)
+    - Markdown-formatted text extraction (with proper tables as | pipes |)
     - Image extraction with position
     - Layout preservation (reading order)
+    - Table detection and Markdown formatting
     - Metadata extraction
     """
 
@@ -32,7 +41,9 @@ class PDFExtractor(BaseExtractor):
         self,
         min_image_width: int = 100,
         min_image_height: int = 100,
-        image_helper=None
+        image_helper=None,
+        use_markdown: bool = True,
+        table_strategy: str = 'lines_strict'
     ):
         """
         Initialize PDF extractor.
@@ -41,10 +52,20 @@ class PDFExtractor(BaseExtractor):
             min_image_width: Minimum image width to extract
             min_image_height: Minimum image height to extract
             image_helper: Optional image processing helper
+            use_markdown: Use pymupdf4llm for Markdown output (recommended)
+            table_strategy: Table detection strategy for pymupdf4llm
         """
         self.min_image_width = min_image_width
         self.min_image_height = min_image_height
         self.image_helper = image_helper
+        self.use_markdown = use_markdown and PYMUPDF4LLM_AVAILABLE
+        self.table_strategy = table_strategy
+
+        if use_markdown and not PYMUPDF4LLM_AVAILABLE:
+            logger.warning(
+                "pymupdf4llm not available. Install with: pip install pymupdf4llm. "
+                "Falling back to basic text extraction."
+            )
 
     def extract(self, file_path: str) -> RawDocument:
         """
@@ -61,14 +82,15 @@ class PDFExtractor(BaseExtractor):
         # Open PDF
         pdf_document = fitz.open(file_path)
 
-        # Extract pages
-        pages = self._extract_pages(pdf_document)
-
-        # Combine text from all pages
-        full_text = "\n\n".join(
-            self._combine_page_content(page["content"])
-            for page in pages
-        )
+        # Extract text using appropriate method
+        if self.use_markdown:
+            full_text, pages = self._extract_with_markdown(file_path, pdf_document)
+        else:
+            pages = self._extract_pages(pdf_document)
+            full_text = "\n\n".join(
+                self._combine_page_content(page["content"])
+                for page in pages
+            )
 
         # Get metadata
         metadata = self._get_basic_metadata(file_path)
@@ -82,9 +104,122 @@ class PDFExtractor(BaseExtractor):
             structure={"pages": pages}
         )
 
+    def _extract_with_markdown(self, file_path: str, pdf_document) -> tuple:
+        """
+        Extract PDF content as Markdown with proper table formatting.
+
+        Args:
+            file_path: Path to PDF file
+            pdf_document: fitz PDF document (for image extraction)
+
+        Returns:
+            Tuple of (full_text, pages_structure)
+        """
+        # Get markdown text with page chunks
+        md_pages = pymupdf4llm.to_markdown(
+            file_path,
+            page_chunks=True,
+            table_strategy=self.table_strategy,
+            ignore_images=True,  # We extract images separately for better control
+            force_text=True
+        )
+
+        pages = []
+        text_parts = []
+
+        for page_idx, md_page in enumerate(md_pages):
+            page_text = md_page.get('text', '')
+            text_parts.append(page_text)
+
+            # Build page structure
+            page_data = {
+                "page_number": page_idx + 1,
+                "content": [],
+                "markdown_text": page_text
+            }
+
+            # Add text content
+            if page_text.strip():
+                page_data["content"].append({
+                    "type": "text",
+                    "content": page_text,
+                    "format": "markdown"
+                })
+
+            # Extract images for this page
+            if page_idx < len(pdf_document):
+                page_images = self._extract_page_images(pdf_document, page_idx)
+                page_data["content"].extend(page_images)
+
+            pages.append(page_data)
+
+        full_text = "\n\n".join(text_parts)
+        return full_text, pages
+
+    def _extract_page_images(self, pdf_document, page_idx: int) -> List[Dict[str, Any]]:
+        """
+        Extract images from a specific page.
+
+        Args:
+            pdf_document: fitz PDF document
+            page_idx: Page index (0-based)
+
+        Returns:
+            List of image content items
+        """
+        images = []
+        page = pdf_document[page_idx]
+
+        image_list = page.get_images(full=True)
+        if image_list:
+            logger.debug(f"Found {len(image_list)} images on page {page_idx + 1}")
+
+        for img_index, img in enumerate(image_list):
+            try:
+                xref = img[0]
+                masks = page.get_image_rects(xref)
+
+                if not masks:
+                    continue
+
+                # Extract image data
+                base_image = pdf_document.extract_image(xref)
+                image_bytes = base_image["image"]
+
+                # Check dimensions
+                image_pil = Image.open(io.BytesIO(image_bytes))
+                width, height = image_pil.size
+
+                # Skip small images
+                if width < self.min_image_width or height < self.min_image_height:
+                    continue
+
+                # Get position from first mask
+                mask = masks[0]
+
+                images.append({
+                    "type": "image",
+                    "content": base64.b64encode(image_bytes).decode('utf-8'),
+                    "width": width,
+                    "height": height,
+                    "page": page_idx + 1,
+                    "position": {
+                        "x0": mask.x0,
+                        "y0": mask.y0,
+                        "x1": mask.x1,
+                        "y1": mask.y1
+                    }
+                })
+
+            except Exception as e:
+                logger.warning(f"Failed to extract image {img_index + 1} from page {page_idx + 1}: {e}")
+                continue
+
+        return images
+
     def _extract_pages(self, pdf_document) -> List[Dict[str, Any]]:
         """
-        Extract all pages from PDF.
+        Extract all pages from PDF (fallback method without pymupdf4llm).
 
         Args:
             pdf_document: fitz PDF document
@@ -118,54 +253,8 @@ class PDFExtractor(BaseExtractor):
                     })
 
             # Extract images
-            image_list = page.get_images(full=True)
-            if image_list:
-                logger.info(f"📸 [PDF-EXTRACTOR] Found {len(image_list)} images on page {page_num + 1}")
-
-            for img_index, img in enumerate(image_list):
-                try:
-                    xref = img[0]
-                    masks = page.get_image_rects(xref)
-
-                    if not masks:
-                        logger.debug(f"⚠️  [PDF-EXTRACTOR] Image {img_index + 1} on page {page_num + 1} has no position masks, skipping")
-                        continue
-
-                    # Extract image data
-                    base_image = pdf_document.extract_image(xref)
-                    image_bytes = base_image["image"]
-
-                    # Check dimensions
-                    image_pil = Image.open(io.BytesIO(image_bytes))
-                    width, height = image_pil.size
-
-                    # Skip small images
-                    if width < self.min_image_width or height < self.min_image_height:
-                        logger.debug(f"⚠️  [PDF-EXTRACTOR] Image {img_index + 1} on page {page_num + 1} too small ({width}x{height}), skipping (min: {self.min_image_width}x{self.min_image_height})")
-                        continue
-
-                    logger.info(f"✅ [PDF-EXTRACTOR] Extracted image {img_index + 1} from page {page_num + 1}: {width}x{height} pixels")
-
-                    # Get position from first mask
-                    mask = masks[0]
-
-                    page_data["content"].append({
-                        "type": "image",
-                        "content": base64.b64encode(image_bytes).decode('utf-8'),
-                        "width": width,
-                        "height": height,
-                        "position": {
-                            "x0": mask.x0,
-                            "y0": mask.y0,
-                            "x1": mask.x1,
-                            "y1": mask.y1
-                        }
-                    })
-
-                except Exception as e:
-                    logger.warning(f"❌ [PDF-EXTRACTOR] Failed to extract image {img_index + 1} from page {page_num + 1}: {e}")
-                    # Skip problematic images
-                    continue
+            page_images = self._extract_page_images(pdf_document, page_num)
+            page_data["content"].extend(page_images)
 
             # Sort content by position (top to bottom, left to right)
             page_data["content"] = self._sort_content_by_position(page_data["content"])
@@ -185,16 +274,19 @@ class PDFExtractor(BaseExtractor):
             Sorted content
         """
         def get_sort_key(item):
-            pos = item["position"]
+            pos = item.get("position", {})
+            if not pos:
+                return (0, 0)
+
             content_type = item["type"]
 
             # Get y coordinate (vertical position)
             if content_type == "image":
-                y = pos["y0"]
-                x = pos["x0"]
+                y = pos.get("y0", 0)
+                x = pos.get("x0", 0)
             else:  # text
-                y = pos["y1"]
-                x = pos["x1"]
+                y = pos.get("y1", 0)
+                x = pos.get("x1", 0)
 
             return (y, x)
 
@@ -202,7 +294,7 @@ class PDFExtractor(BaseExtractor):
 
     def _combine_page_content(self, content: List[Dict[str, Any]]) -> str:
         """
-        Combine page content into text.
+        Combine page content into text (fallback method).
 
         Args:
             content: Page content items
@@ -233,11 +325,12 @@ class PDFExtractor(BaseExtractor):
         metadata = pdf_document.metadata or {}
 
         return {
-            "author": metadata.get("author", "Unknown"),
+            "author": metadata.get("author", ""),
             "title": metadata.get("title", ""),
             "subject": metadata.get("subject", ""),
             "creator": metadata.get("creator", ""),
             "producer": metadata.get("producer", ""),
             "page_count": len(pdf_document),
-            "format": "pdf"
+            "format": "pdf",
+            "extraction_method": "pymupdf4llm" if self.use_markdown else "pymupdf"
         }

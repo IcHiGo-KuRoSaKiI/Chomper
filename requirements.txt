@@ -17,6 +17,7 @@ chardet>=5.2.0
 
 # PDF support
 pymupdf>=1.23.0
+pymupdf4llm>=0.0.5  # LLM-optimized Markdown output with table detection
 pillow>=10.1.0
 
 # DOCX/PPTX support

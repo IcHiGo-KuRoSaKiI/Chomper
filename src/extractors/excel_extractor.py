@@ -439,18 +439,20 @@ class ExcelExtractor(BaseExtractor):
 
         return "text"
 
-    def _sheet_to_text(self, sheet, sheet_info: SheetInfo) -> str:
+    def _sheet_to_text(self, sheet, sheet_info: SheetInfo, use_markdown: bool = True) -> str:
         """
-        Convert sheet to plain text.
+        Convert sheet to Markdown table format.
 
         Handles merged cells by filling them with top-left value.
+        Outputs proper Markdown pipe tables that LLMs prefer.
 
         Args:
             sheet: Worksheet
             sheet_info: SheetInfo with metadata
+            use_markdown: Output Markdown pipe tables (default True)
 
         Returns:
-            Plain text representation
+            Markdown table representation
         """
         # Create a dict to track merged cell values
         merged_values = {}
@@ -479,14 +481,24 @@ class ExcelExtractor(BaseExtractor):
                     cell = sheet.cell(row_idx, col_idx)
                     value = cell.value
 
-                # Convert to string
+                # Convert to string, escape pipes for Markdown
                 if value is not None:
-                    row_values.append(str(value))
+                    cell_str = str(value).replace('|', '\\|')
+                    row_values.append(cell_str)
                 else:
                     row_values.append("")
 
-            # Join with tabs (TSV format)
-            rows_text.append("\t".join(row_values))
+            if use_markdown:
+                # Markdown pipe table format: | col1 | col2 | col3 |
+                rows_text.append("|" + "|".join(row_values) + "|")
+
+                # Add header separator after first row
+                if row_idx == 1:
+                    separator = "|" + "|".join(["---"] * len(row_values)) + "|"
+                    rows_text.append(separator)
+            else:
+                # Fallback to TSV format
+                rows_text.append("\t".join(row_values))
 
         return "\n".join(rows_text)
 

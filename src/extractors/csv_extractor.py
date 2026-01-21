@@ -272,20 +272,44 @@ class CSVExtractor(BaseExtractor):
 
         return column_types
 
-    def _dataframe_to_text(self, df: 'pd.DataFrame') -> str:
+    def _dataframe_to_text(self, df: 'pd.DataFrame', use_markdown: bool = True) -> str:
         """
-        Convert DataFrame to text representation.
+        Convert DataFrame to Markdown table format.
 
-        Uses TSV format (tab-separated) for consistency with Excel.
+        Outputs proper Markdown pipe tables that LLMs prefer.
 
         Args:
             df: Pandas DataFrame
+            use_markdown: Output Markdown pipe tables (default True)
 
         Returns:
-            Text representation
+            Markdown table representation
         """
-        # Convert to TSV (tab-separated)
-        return df.to_csv(sep='\t', index=False, na_rep='')
+        if not use_markdown:
+            # Fallback to TSV format
+            return df.to_csv(sep='\t', index=False, na_rep='')
+
+        # Build Markdown pipe table
+        lines = []
+
+        # Header row
+        headers = [str(col).replace('|', '\\|') for col in df.columns]
+        lines.append("|" + "|".join(headers) + "|")
+
+        # Header separator
+        lines.append("|" + "|".join(["---"] * len(headers)) + "|")
+
+        # Data rows
+        for _, row in df.iterrows():
+            cells = []
+            for val in row:
+                if pd.isna(val):
+                    cells.append("")
+                else:
+                    cells.append(str(val).replace('|', '\\|'))
+            lines.append("|" + "|".join(cells) + "|")
+
+        return "\n".join(lines)
 
     def _extract_csv_metadata(self, csv_metadata: CSVMetadata) -> Dict[str, Any]:
         """
