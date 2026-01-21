@@ -91,7 +91,42 @@ parse_document(file_path: "/path/to/doc.pdf", output_format: "toon")
 → Returns in TOON format (~40% fewer tokens)
 ```
 
-### 2. `get_document_chunk`
+### 2. `parse_document_bytes`
+
+Parse a document from **base64-encoded content**. Perfect for documents from cloud storage (S3, Azure Blob), API responses, database BLOBs, or in-memory documents.
+
+**Parameters:**
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `content_base64` | string | required | Base64-encoded file content |
+| `filename` | string | required | Filename with extension (e.g., `"report.pdf"`) for format detection |
+| `full_text` | boolean | `false` | Return complete text |
+| `include_images` | boolean | `false` | Include images as ImageContent |
+| `output_format` | string | `"json"` | Output format: `"json"` or `"toon"` |
+
+**Example:**
+```python
+import base64
+
+# Read file and encode to base64
+with open("document.pdf", "rb") as f:
+    content = base64.b64encode(f.read()).decode()
+
+# Send via MCP
+parse_document_bytes(
+    content_base64=content,
+    filename="document.pdf"
+)
+→ Returns extracted text + metadata (same as parse_document)
+```
+
+**Use Cases:**
+- Documents fetched from cloud storage (S3, Azure Blob, GCS)
+- Files received from API responses
+- Documents stored as BLOBs in databases
+- In-memory document processing without disk I/O
+
+### 4. `get_document_chunk`
 
 Get a specific portion of document text. **Use for paginated retrieval of large documents.**
 
@@ -115,7 +150,7 @@ Get a specific portion of document text. **Use for paginated retrieval of large 
    → Returns chars 10000-15000, etc.
 ```
 
-### 3. `get_document_images`
+### 5. `get_document_images`
 
 Retrieve images from a document on-demand. Returns images as ImageContent objects.
 
@@ -132,7 +167,7 @@ get_document_images(file_path: "doc.pdf", page: 1, max_images: 3)
 → Returns first 3 images from page 1 as ImageContent
 ```
 
-### 4. `parse_document_chunked`
+### 6. `parse_document_chunked`
 
 Parse a document into semantic chunks with configurable size and overlap. Ideal for RAG systems.
 
@@ -179,7 +214,7 @@ Parse a document into semantic chunks with configurable size and overlap. Ideal 
 }
 ```
 
-### 5. `extract_metadata`
+### 7. `extract_metadata`
 
 Quick metadata extraction without full document processing.
 
@@ -205,11 +240,11 @@ Quick metadata extraction without full document processing.
 }
 ```
 
-### 6. `list_supported_formats`
+### 8. `list_supported_formats`
 
 List all supported document formats with availability status.
 
-### 7. `batch_parse`
+### 9. `batch_parse`
 
 Parse multiple documents in a single request.
 
