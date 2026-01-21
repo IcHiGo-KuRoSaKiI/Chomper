@@ -27,12 +27,14 @@ Usage:
 """
 
 import asyncio
+import base64
 import json
 import logging
 import re
 import sys
+import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -266,6 +268,56 @@ def _validate_file_path(file_path: str) -> Path:
     return path
 
 
+def _parse_from_base64(content_base64: str, filename: str) -> Tuple[Path, None]:
+    """
+    Decode base64 content and write to a temporary file.
+
+    Args:
+        content_base64: Base64-encoded file content
+        filename: Filename with extension for format detection (e.g., 'report.pdf')
+
+    Returns:
+        Tuple of (temp_file_path, None) - second element reserved for future cleanup callback
+
+    Raises:
+        ValueError: If filename has no extension or base64 content is invalid
+    """
+    # Get extension from filename
+    ext = Path(filename).suffix.lower()
+    if not ext:
+        raise ValueError(
+            "filename must have an extension for format detection (e.g., 'document.pdf', 'data.xlsx')"
+        )
+
+    # Validate extension is supported
+    if ext not in EXTRACTORS:
+        raise ValueError(
+            f"Unsupported file format: {ext}. "
+            f"Supported formats: {', '.join(sorted(EXTRACTORS.keys()))}"
+        )
+
+    # Decode base64
+    try:
+        content_bytes = base64.b64decode(content_base64)
+    except Exception as e:
+        raise ValueError(f"Invalid base64 content: {e}")
+
+    # Write to temp file with correct extension
+    temp_file = tempfile.NamedTemporaryFile(
+        suffix=ext,
+        delete=False
+    )
+    try:
+        temp_file.write(content_bytes)
+        temp_file.close()
+        return Path(temp_file.name), None
+    except Exception as e:
+        # Cleanup on error
+        temp_file.close()
+        Path(temp_file.name).unlink(missing_ok=True)
+        raise ValueError(f"Failed to write temp file: {e}")
+
+
 def _get_extractor_for_file(file_path: Path) -> Any:
     """
     Get appropriate extractor for file type.
@@ -463,6 +515,21 @@ async def list_tools() -> List[Tool]:
             }
         ),
         Tool(
+            name="parse_document_bytes",
+            description="Parse a document from base64-encoded content. Use when document exists in memory, from cloud storage (S3, Azure Blob), API responses, or database. Supports all formats that parse_document supports.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "content_base64": {"type": "string", "description": "Base64-encoded file content"},
+                    "filename": {"type": "string", "description": "Filename with extension for format detection (e.g., 'report.pdf', 'data.xlsx', 'doc.docx')"},
+                    "full_text": {"type": "boolean", "default": False, "description": "If true, return complete text. Default false returns first 5000 chars with continuation hint."},
+                    "include_images": {"type": "boolean", "default": False, "description": "Include extracted images as ImageContent (default: false)."},
+                    "output_format": {"type": "string", "enum": ["json", "toon"], "default": "json", "description": "Output format: 'json' (default) or 'toon' (token-optimized, ~40% fewer tokens)"}
+                },
+                "required": ["content_base64", "filename"]
+            }
+        ),
+        Tool(
             name="get_document_chunk",
             description="Get a specific portion of document text. Use for paginated retrieval of large documents. Returns plain text content plus metadata about remaining content.",
             inputSchema={
@@ -649,6 +716,8 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> Sequence[TextConten
     try:
         if name == "parse_document":
             return await _handle_parse_document(arguments)
+        elif name == "parse_document_bytes":
+            return await _handle_parse_document_bytes(arguments)
         elif name == "get_document_chunk":
             return await _handle_get_document_chunk(arguments)
         elif name == "get_document_images":
@@ -833,6 +902,72 @@ async def _handle_parse_document(arguments: Dict[str, Any]) -> List[TextContent 
                 ))
 
     return response_items
+
+
+async def _handle_parse_document_bytes(arguments: Dict[str, Any]) -> List[TextContent | ImageContent]:
+    """
+    Handle parse_document_bytes tool call for base64-encoded documents.
+
+    Decodes base64 content to a temp file, parses it using existing infrastructure,
+    then cleans up the temp file.
+
+    Args:
+        arguments: Tool arguments including content_base64 and filename
+
+    Returns:
+        List of TextContent and ImageContent (same as parse_document)
+    """
+    content_base64 = arguments.get("content_base64")
+    filename = arguments.get("filename")
+
+    if not content_base64:
+        raise ValueError("content_base64 is required")
+    if not filename:
+        raise ValueError("filename is required (e.g., 'document.pdf', 'data.xlsx')")
+
+    logger.info(f"Parsing document from base64: {filename}")
+
+    # Create temp file from base64
+    temp_path, _ = _parse_from_base64(content_base64, filename)
+
+    try:
+        # Reuse existing parse logic by building modified arguments
+        modified_args = {
+            "file_path": str(temp_path),
+            "full_text": arguments.get("full_text", False),
+            "include_images": arguments.get("include_images", False),
+            "output_format": arguments.get("output_format", DEFAULT_OUTPUT_FORMAT),
+        }
+
+        # Use existing handler
+        result = await _handle_parse_document(modified_args)
+
+        # Update file_path in response to show original filename instead of temp path
+        # Handle both the temp path and any symlinked variants (e.g., /var vs /private/var on macOS)
+        temp_path_str = str(temp_path)
+        temp_path_resolved = str(temp_path.resolve())
+        temp_filename = temp_path.name  # Just the filename like "tmpXXXXX.json"
+
+        updated_result = []
+        for item in result:
+            if isinstance(item, TextContent):
+                # Replace temp path with original filename in text
+                updated_text = item.text
+                # Replace full paths first (more specific)
+                updated_text = updated_text.replace(temp_path_resolved, filename)
+                updated_text = updated_text.replace(temp_path_str, filename)
+                # Replace just the temp filename (for TOON format which uses basename)
+                updated_text = updated_text.replace(temp_filename, filename)
+                updated_result.append(TextContent(type="text", text=updated_text))
+            else:
+                updated_result.append(item)
+
+        return updated_result
+
+    finally:
+        # Always cleanup temp file
+        temp_path.unlink(missing_ok=True)
+        logger.debug(f"Cleaned up temp file: {temp_path}")
 
 
 async def _handle_get_document_chunk(arguments: Dict[str, Any]) -> List[TextContent]:
