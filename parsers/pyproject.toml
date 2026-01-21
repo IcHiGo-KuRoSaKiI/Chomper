@@ -1,0 +1,123 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "parsers"
+version = "2.0.0"
+description = "Professional document parsing module supporting 9 formats: PDF, DOCX, PPTX, Code, Text, Markdown, Excel, CSV, HTML"
+readme = "README.md"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+license = {text = "MIT"}
+requires-python = ">=3.9"
+keywords = ["parsing", "document", "pdf", "docx", "pptx", "excel", "csv", "html", "markdown", "nlp", "rag"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Text Processing :: General",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+# Core dependencies
+dependencies = [
+    "dataclasses-json>=0.6.0",
+    "pydantic>=2.0.0",
+    "nltk>=3.8.0",
+    "python-magic>=0.4.27",
+    "chardet>=5.2.0",
+]
+
+[project.optional-dependencies]
+# Format-specific dependencies
+pdf = [
+    "pymupdf>=1.23.0",
+    "pillow>=10.1.0",
+]
+office = [
+    "python-docx>=1.1.0",
+    "python-pptx>=0.6.23",
+]
+excel = [
+    "openpyxl>=3.1.2",
+    "pandas>=2.1.0",
+]
+html = [
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.0.0",
+    "trafilatura>=1.6.0",
+]
+nlp = [
+    "spacy>=3.7.0",
+]
+
+# Install all formats
+all = [
+    "pymupdf>=1.23.0",
+    "pillow>=10.1.0",
+    "python-docx>=1.1.0",
+    "python-pptx>=0.6.23",
+    "openpyxl>=3.1.2",
+    "pandas>=2.1.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.0.0",
+    "trafilatura>=1.6.0",
+    "spacy>=3.7.0",
+]
+
+# Development dependencies
+dev = [
+    "pytest>=7.4.3",
+    "pytest-cov>=4.1.0",
+    "black>=23.12.0",
+    "flake8>=6.1.0",
+    "mypy>=1.7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/parsers"
+Documentation = "https://github.com/yourusername/parsers#readme"
+Repository = "https://github.com/yourusername/parsers"
+Issues = "https://github.com/yourusername/parsers/issues"
+
+[tool.setuptools.packages.find]
+exclude = ["tests*", "examples*"]
+
+[tool.black]
+line-length = 100
+target-version = ['py39', 'py310', 'py311', 'py312']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+addopts = "-v --cov=parsers --cov-report=term-missing"
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
