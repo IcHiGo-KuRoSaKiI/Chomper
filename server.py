@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
 """
-Production-ready MCP Server for Document Parsing.
+Chomper - Chomp through any document.
 
-This server exposes the parsers library functionality via the Model Context Protocol,
-enabling AI systems to parse and analyze documents across multiple formats.
+An MCP server that parses 36+ file formats for AI systems like Claude.
 
 Features:
 - Full document parsing with text, metadata, and image extraction
-- Chunked parsing with configurable size and overlap
-- Metadata-only extraction for quick document analysis
+- Semantic chunking with sentence-transformers for RAG
+- TOON format for ~40% token reduction
+- MCP prompts for document analysis
 - Batch processing for multiple files
-- On-demand image retrieval with get_document_images
-- Paginated content retrieval with get_document_chunk
-- Support for PDF, DOCX, PPTX, Excel, CSV, HTML, Markdown, and code files
+- Support for PDF, DOCX, PPTX, Excel, CSV, HTML, Markdown, JSON, YAML, XML, Email, EPUB, RTF, and code files
 
 Usage:
     python server.py
@@ -20,7 +18,7 @@ Usage:
     Or via MCP client configuration:
     {
         "mcpServers": {
-            "document-parser": {
+            "chomper": {
                 "command": "python",
                 "args": ["/path/to/server.py"]
             }
@@ -89,10 +87,10 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
-logger = logging.getLogger("document-parser-mcp")
+logger = logging.getLogger("chomper")
 
 # Initialize MCP server
-server = Server("document-parser")
+server = Server("chomper")
 
 # Default constants
 DEFAULT_SUMMARY_CHARS = 5000

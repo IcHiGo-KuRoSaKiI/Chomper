@@ -10,7 +10,7 @@ By participating in this project, you agree to maintain a respectful and inclusi
 
 ### Reporting Bugs
 
-1. Check if the bug has already been reported in [Issues](https://github.com/IcHiGo-KuRoSaKiI/parser-mcp/issues)
+1. Check if the bug has already been reported in [Issues](https://github.com/IcHiGo-KuRoSaKiI/Chomper/issues)
 2. If not, create a new issue with:
    - Clear, descriptive title
    - Steps to reproduce
@@ -145,7 +145,7 @@ src/
 
 ## Questions?
 
-- Open a [Discussion](https://github.com/IcHiGo-KuRoSaKiI/parser-mcp/discussions)
+- Open a [Discussion](https://github.com/IcHiGo-KuRoSaKiI/Chomper/discussions)
 - Tag maintainers in your issue/PR
 
 ## License

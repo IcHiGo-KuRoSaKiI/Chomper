@@ -1,10 +1,10 @@
-# Document Parser MCP Server
+# Chomper
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/)
 
-A production-ready [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that exposes multi-format document parsing capabilities to AI systems like Claude.
+**Chomp through any document.** An MCP server that parses 36+ file formats for AI systems like Claude.
 
 ## Features
 
@@ -23,8 +23,8 @@ A production-ready [Model Context Protocol (MCP)](https://modelcontextprotocol.i
 
 ```bash
 # Clone the repository
-git clone https://github.com/IcHiGo-KuRoSaKiI/parser-mcp.git
-cd parser-mcp
+git clone https://github.com/IcHiGo-KuRoSaKiI/Chomper.git
+cd chomper
 
 # Create virtual environment and install
 python -m venv venv
@@ -39,13 +39,13 @@ pip install -e .
 python server.py
 
 # Or via the installed command
-document-parser-mcp
+chomper
 ```
 
 ### Configure in Claude Code
 
 ```bash
-claude mcp add -s user document-parser -- /path/to/Parser-MCP/venv/bin/python /path/to/Parser-MCP/server.py
+claude mcp add -s user chomper -- /path/to/chomper/venv/bin/python /path/to/chomper/server.py
 ```
 
 ### Configure in Claude Desktop
@@ -55,9 +55,9 @@ Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/
 ```json
 {
   "mcpServers": {
-    "document-parser": {
-      "command": "/path/to/Parser-MCP/venv/bin/python",
-      "args": ["/path/to/Parser-MCP/server.py"]
+    "chomper": {
+      "command": "/path/to/chomper/venv/bin/python",
+      "args": ["/path/to/chomper/server.py"]
     }
   }
 }
@@ -369,7 +369,7 @@ ruff check .
 
 ## Comparison with Other Tools
 
-| Feature | This Parser | LlamaParse | Docling | Unstructured |
+| Feature | Chomper | LlamaParse | Docling | Unstructured |
 |---------|-------------|------------|---------|--------------|
 | MCP Native | Yes | No | No | No |
 | Format Count | 36 | ~15 | ~10 | ~20 |
@@ -388,8 +388,8 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for gu
 
 ```bash
 # Fork and clone
-git clone https://github.com/YOUR_USERNAME/parser-mcp.git
-cd parser-mcp
+git clone https://github.com/YOUR_USERNAME/chomper.git
+cd chomper
 
 # Setup dev environment
 python -m venv venv
@@ -410,4 +410,4 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ---
 
-Built with care by [@IcHiGo-KuRoSaKiI](https://github.com/IcHiGo-KuRoSaKiI)
+Built with love by [@IcHiGo-KuRoSaKiI](https://github.com/IcHiGo-KuRoSaKiI)

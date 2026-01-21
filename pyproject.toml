@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "document-parser-mcp"
+name = "chomper"
 version = "1.0.0"
-description = "MCP Server for multi-format document parsing with text, metadata, and image extraction"
+description = "Chomp through any document - MCP server for parsing 36+ file formats for AI systems"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -66,13 +66,13 @@ minimal = [
 ]
 
 [project.scripts]
-document-parser-mcp = "server:main"
+chomper = "server:main"
 
 [project.urls]
-Homepage = "https://github.com/IcHiGo-KuRoSaKiI/parser-mcp"
-Documentation = "https://github.com/IcHiGo-KuRoSaKiI/parser-mcp#readme"
-Repository = "https://github.com/IcHiGo-KuRoSaKiI/parser-mcp"
-Issues = "https://github.com/IcHiGo-KuRoSaKiI/parser-mcp/issues"
+Homepage = "https://github.com/IcHiGo-KuRoSaKiI/Chomper"
+Documentation = "https://github.com/IcHiGo-KuRoSaKiI/Chomper#readme"
+Repository = "https://github.com/IcHiGo-KuRoSaKiI/Chomper"
+Issues = "https://github.com/IcHiGo-KuRoSaKiI/Chomper/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src", "server.py"]
