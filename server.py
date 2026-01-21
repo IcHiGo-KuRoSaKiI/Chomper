@@ -48,6 +48,7 @@ from mcp.types import (
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src import DocumentPipeline, SimpleFormatter
+from src.formatters.toon_formatter import TOONFormatter
 from src.extractors import (
     PDFExtractor,
     DOCXExtractor,
@@ -84,6 +85,11 @@ server = Server("document-parser")
 DEFAULT_SUMMARY_CHARS = 5000
 DEFAULT_CHUNK_LIMIT = 5000
 DEFAULT_MAX_IMAGES = 5
+
+# Output format options
+OUTPUT_FORMAT_JSON = "json"
+OUTPUT_FORMAT_TOON = "toon"
+DEFAULT_OUTPUT_FORMAT = OUTPUT_FORMAT_JSON
 
 # Format descriptions for supported extensions
 FORMAT_DESCRIPTIONS: Dict[str, str] = {
@@ -400,7 +406,8 @@ async def list_tools() -> List[Tool]:
                 "properties": {
                     "file_path": {"type": "string", "description": "Absolute path to the document file"},
                     "full_text": {"type": "boolean", "default": False, "description": "If true, return complete text. Default false returns first 5000 chars with continuation hint."},
-                    "include_images": {"type": "boolean", "default": False, "description": "Include extracted images as ImageContent (default: false). Use get_document_images for on-demand retrieval."}
+                    "include_images": {"type": "boolean", "default": False, "description": "Include extracted images as ImageContent (default: false). Use get_document_images for on-demand retrieval."},
+                    "output_format": {"type": "string", "enum": ["json", "toon"], "default": "json", "description": "Output format: 'json' (default) or 'toon' (token-optimized, ~40% fewer tokens)"}
                 },
                 "required": ["file_path"]
             }
@@ -413,7 +420,8 @@ async def list_tools() -> List[Tool]:
                 "properties": {
                     "file_path": {"type": "string", "description": "Absolute path to the document file"},
                     "offset": {"type": "integer", "default": 0, "description": "Character offset to start from (default: 0)"},
-                    "limit": {"type": "integer", "default": 5000, "description": "Maximum characters to return (default: 5000)"}
+                    "limit": {"type": "integer", "default": 5000, "description": "Maximum characters to return (default: 5000)"},
+                    "output_format": {"type": "string", "enum": ["json", "toon"], "default": "json", "description": "Output format: 'json' (default) or 'toon' (token-optimized)"}
                 },
                 "required": ["file_path"]
             }
@@ -439,7 +447,8 @@ async def list_tools() -> List[Tool]:
                 "properties": {
                     "file_path": {"type": "string", "description": "Absolute path to the document file"},
                     "chunk_size": {"type": "integer", "default": 1000, "description": "Target words per chunk (default: 1000)"},
-                    "overlap": {"type": "integer", "default": 100, "description": "Words to overlap between chunks (default: 100)"}
+                    "overlap": {"type": "integer", "default": 100, "description": "Words to overlap between chunks (default: 100)"},
+                    "output_format": {"type": "string", "enum": ["json", "toon"], "default": "json", "description": "Output format: 'json' (default) or 'toon' (token-optimized)"}
                 },
                 "required": ["file_path"]
             }
@@ -450,7 +459,8 @@ async def list_tools() -> List[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "file_path": {"type": "string", "description": "Absolute path to the document file"}
+                    "file_path": {"type": "string", "description": "Absolute path to the document file"},
+                    "output_format": {"type": "string", "enum": ["json", "toon"], "default": "json", "description": "Output format: 'json' (default) or 'toon' (token-optimized)"}
                 },
                 "required": ["file_path"]
             }
@@ -523,7 +533,7 @@ async def _handle_parse_document(arguments: Dict[str, Any]) -> List[TextContent 
 
     Returns:
     - TextContent[0]: Plain extracted text (no JSON wrapping)
-    - TextContent[1]: Metadata as JSON
+    - TextContent[1]: Metadata as JSON (or TOON format if output_format=toon)
     - ImageContent[]: Each image as separate ImageContent (if include_images=true)
 
     Args:
@@ -535,6 +545,7 @@ async def _handle_parse_document(arguments: Dict[str, Any]) -> List[TextContent 
     file_path_str = arguments.get("file_path")
     full_text = arguments.get("full_text", False)
     include_images = arguments.get("include_images", False)
+    output_format = arguments.get("output_format", DEFAULT_OUTPUT_FORMAT)
 
     # Validate path
     file_path = _validate_file_path(file_path_str)
@@ -550,58 +561,84 @@ async def _handle_parse_document(arguments: Dict[str, Any]) -> List[TextContent 
     # Clean text by removing image placeholders
     clean_text = _remove_image_placeholders(raw_doc.text)
     total_chars = len(clean_text)
-
-    # Build response content list
-    response_items: List[TextContent | ImageContent] = []
-
-    # Determine text to return
-    if full_text or total_chars <= DEFAULT_SUMMARY_CHARS:
-        text_content = clean_text
-        continuation_hint = None
-    else:
-        text_content = clean_text[:DEFAULT_SUMMARY_CHARS]
-        remaining_chars = total_chars - DEFAULT_SUMMARY_CHARS
-        continuation_hint = (
-            f"Document has {remaining_chars} more characters. "
-            f"Use get_document_chunk(file_path, offset={DEFAULT_SUMMARY_CHARS}) for more."
-        )
-
-    # TextContent[0]: Plain extracted text
-    response_items.append(TextContent(type="text", text=text_content))
-
-    # Build metadata
-    metadata_dict: Dict[str, Any] = {
-        "file_path": str(file_path),
-        "total_characters": total_chars,
-        "total_words": len(clean_text.split()),
-        "document_metadata": raw_doc.metadata,
-    }
-
-    # Add continuation hint if applicable
-    if continuation_hint:
-        metadata_dict["continuation_hint"] = continuation_hint
-
-    # Add page/image count for PDFs
+    total_words = len(clean_text.split())
     extension = file_path.suffix.lower()
+
+    # Get page/image count for PDFs
+    page_count = None
+    image_count = 0
     if extension == ".pdf" and raw_doc.structure:
         pages = raw_doc.structure.get("pages", [])
+        page_count = len(pages)
         image_count = sum(
             1 for page in pages
             for item in page.get("content", [])
             if item.get("type") == "image"
         )
-        metadata_dict["page_count"] = len(pages)
-        metadata_dict["image_count"] = image_count
-        if image_count > 0 and not include_images:
-            metadata_dict["images_hint"] = (
-                f"Document contains {image_count} images. "
-                f"Use get_document_images(file_path) to retrieve them."
+
+    # Determine text to return
+    if full_text or total_chars <= DEFAULT_SUMMARY_CHARS:
+        text_content = clean_text
+        truncated = False
+        continuation_offset = None
+    else:
+        text_content = clean_text[:DEFAULT_SUMMARY_CHARS]
+        truncated = True
+        continuation_offset = DEFAULT_SUMMARY_CHARS
+
+    # Build response content list
+    response_items: List[TextContent | ImageContent] = []
+
+    # TOON format output
+    if output_format == OUTPUT_FORMAT_TOON:
+        toon_output = TOONFormatter.format_raw(
+            file_path=str(file_path),
+            text=text_content,
+            metadata=raw_doc.metadata,
+            doc_type=extension[1:] if extension else "unknown",
+            total_chars=total_chars,
+            total_words=total_words,
+            page_count=page_count,
+            image_count=image_count if image_count > 0 else None,
+            truncated=truncated,
+            continuation_offset=continuation_offset
+        )
+        response_items.append(TextContent(type="text", text=toon_output))
+
+    # JSON format output (default)
+    else:
+        # TextContent[0]: Plain extracted text
+        response_items.append(TextContent(type="text", text=text_content))
+
+        # Build metadata
+        metadata_dict: Dict[str, Any] = {
+            "file_path": str(file_path),
+            "total_characters": total_chars,
+            "total_words": total_words,
+            "document_metadata": raw_doc.metadata,
+        }
+
+        # Add continuation hint if applicable
+        if truncated:
+            metadata_dict["continuation_hint"] = (
+                f"Document has {total_chars - DEFAULT_SUMMARY_CHARS} more characters. "
+                f"Use get_document_chunk(file_path, offset={DEFAULT_SUMMARY_CHARS}) for more."
             )
 
-    # TextContent[1]: Metadata as JSON
-    response_items.append(TextContent(type="text", text=json.dumps(metadata_dict, indent=2, default=str)))
+        # Add page/image count for PDFs
+        if page_count is not None:
+            metadata_dict["page_count"] = page_count
+            metadata_dict["image_count"] = image_count
+            if image_count > 0 and not include_images:
+                metadata_dict["images_hint"] = (
+                    f"Document contains {image_count} images. "
+                    f"Use get_document_images(file_path) to retrieve them."
+                )
 
-    # Add images if requested
+        # TextContent[1]: Metadata as JSON
+        response_items.append(TextContent(type="text", text=json.dumps(metadata_dict, indent=2, default=str)))
+
+    # Add images if requested (same for both formats)
     if include_images:
         images = _extract_images_from_structure(raw_doc.structure, max_images=DEFAULT_MAX_IMAGES)
 
@@ -612,16 +649,22 @@ async def _handle_parse_document(arguments: Dict[str, Any]) -> List[TextContent 
             position = img.get("position", {})
 
             # Add image position info as TextContent
-            position_info = {
-                "image_index": idx + 1,
-                "page": page_num,
-                "dimensions": f"{width}x{height}",
-                "position": position
-            }
-            response_items.append(TextContent(
-                type="text",
-                text=f"Image {idx + 1} info: {json.dumps(position_info)}"
-            ))
+            if output_format == OUTPUT_FORMAT_TOON:
+                response_items.append(TextContent(
+                    type="text",
+                    text=f"img:{idx + 1}|p:{page_num}|{width}x{height}"
+                ))
+            else:
+                position_info = {
+                    "image_index": idx + 1,
+                    "page": page_num,
+                    "dimensions": f"{width}x{height}",
+                    "position": position
+                }
+                response_items.append(TextContent(
+                    type="text",
+                    text=f"Image {idx + 1} info: {json.dumps(position_info)}"
+                ))
 
             # Add actual image as ImageContent
             base64_data = img.get("base64", "")
@@ -636,10 +679,16 @@ async def _handle_parse_document(arguments: Dict[str, Any]) -> List[TextContent 
         # Note if there are more images
         total_images = len(_extract_images_from_structure(raw_doc.structure))
         if total_images > len(images):
-            response_items.append(TextContent(
-                type="text",
-                text=f"Showing {len(images)} of {total_images} images. Use get_document_images for more."
-            ))
+            if output_format == OUTPUT_FORMAT_TOON:
+                response_items.append(TextContent(
+                    type="text",
+                    text=f"~{len(images)}/{total_images}imgs|use:get_document_images"
+                ))
+            else:
+                response_items.append(TextContent(
+                    type="text",
+                    text=f"Showing {len(images)} of {total_images} images. Use get_document_images for more."
+                ))
 
     return response_items
 
@@ -657,6 +706,7 @@ async def _handle_get_document_chunk(arguments: Dict[str, Any]) -> List[TextCont
     file_path_str = arguments.get("file_path")
     offset = arguments.get("offset", 0)
     limit = arguments.get("limit", DEFAULT_CHUNK_LIMIT)
+    output_format = arguments.get("output_format", DEFAULT_OUTPUT_FORMAT)
 
     # Validate path
     file_path = _validate_file_path(file_path_str)
@@ -693,8 +743,21 @@ async def _handle_get_document_chunk(arguments: Dict[str, Any]) -> List[TextCont
     end_pos = min(offset + limit, total_chars)
     chunk_text = clean_text[offset:end_pos]
     remaining = total_chars - end_pos
+    has_more = remaining > 0
 
-    # Build response
+    # TOON format output
+    if output_format == OUTPUT_FORMAT_TOON:
+        toon_output = TOONFormatter.format_chunk_response(
+            file_path=str(file_path),
+            text=chunk_text,
+            offset=offset,
+            limit=limit,
+            total_chars=total_chars,
+            has_more=has_more
+        )
+        return [TextContent(type="text", text=toon_output)]
+
+    # JSON format output (default)
     response_items: List[TextContent] = []
 
     # TextContent[0]: The text chunk
@@ -708,10 +771,10 @@ async def _handle_get_document_chunk(arguments: Dict[str, Any]) -> List[TextCont
         "returned_chars": len(chunk_text),
         "total_chars": total_chars,
         "remaining_chars": remaining,
-        "has_more": remaining > 0
+        "has_more": has_more
     }
 
-    if remaining > 0:
+    if has_more:
         chunk_metadata["next_chunk_hint"] = (
             f"Use get_document_chunk(file_path, offset={end_pos}, limit={limit}) "
             f"to get next {min(remaining, limit)} of {remaining} remaining characters."
@@ -829,11 +892,12 @@ async def _handle_parse_document_chunked(arguments: Dict[str, Any]) -> List[Text
         arguments: Tool arguments
 
     Returns:
-        List with TextContent containing chunked document result as JSON
+        List with TextContent containing chunked document result as JSON or TOON
     """
     file_path_str = arguments.get("file_path")
     chunk_size = arguments.get("chunk_size", 1000)
     overlap = arguments.get("overlap", 100)
+    output_format = arguments.get("output_format", DEFAULT_OUTPUT_FORMAT)
 
     # Validate path
     file_path = _validate_file_path(file_path_str)
@@ -852,7 +916,51 @@ async def _handle_parse_document_chunked(arguments: Dict[str, Any]) -> List[Text
     # Chunk document
     chunks = chunker.chunk(raw_doc)
 
-    # Build response
+    # Calculate statistics
+    total_words = sum(chunk.word_count for chunk in chunks)
+    total_chars = len(raw_doc.text)
+    extension = file_path.suffix.lower()
+
+    # TOON format output
+    if output_format == OUTPUT_FORMAT_TOON:
+        lines = []
+
+        # Document header
+        parts = [
+            f"d:{file_path.name}",
+            f"t:{extension[1:] if extension else 'unknown'}",
+            f"w:{total_words}",
+            f"c:{total_chars}",
+            f"n:{len(chunks)}"
+        ]
+        lines.append("|".join(parts))
+
+        # Metadata
+        meta_parts = []
+        for key in ["author", "title"]:
+            if key in raw_doc.metadata and raw_doc.metadata[key]:
+                val = str(raw_doc.metadata[key]).replace(",", "\\,")
+                meta_parts.append(f"{key}={val}")
+        if meta_parts:
+            lines.append(f"m:{','.join(meta_parts)}")
+
+        # Chunks
+        for chunk in chunks:
+            lines.append("---")
+            # Chunk header
+            section_name = getattr(chunk, "section_name", "") or ""
+            section_type = getattr(chunk, "section_type", "text") or "text"
+            lines.append(f"{chunk.chunk_id}|{chunk.start_char}-{chunk.end_char}|{section_type}|{section_name}")
+            # Chunk text
+            lines.append(chunk.text)
+            # Keywords
+            keywords = getattr(chunk, "keywords", [])
+            if keywords:
+                lines.append(f"k:{','.join(keywords[:10])}")
+
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    # JSON format output (default)
     response: Dict[str, Any] = {
         "success": True,
         "file_path": str(file_path),
@@ -863,12 +971,10 @@ async def _handle_parse_document_chunked(arguments: Dict[str, Any]) -> List[Text
         "metadata": raw_doc.metadata,
     }
 
-    # Add statistics
-    total_words = sum(chunk.word_count for chunk in chunks)
     response["statistics"] = {
         "total_words": total_words,
         "average_chunk_words": total_words // len(chunks) if chunks else 0,
-        "total_characters": len(raw_doc.text),
+        "total_characters": total_chars,
     }
 
     return [TextContent(type="text", text=json.dumps(response, indent=2, default=str))]
@@ -882,9 +988,10 @@ async def _handle_extract_metadata(arguments: Dict[str, Any]) -> List[TextConten
         arguments: Tool arguments
 
     Returns:
-        List with TextContent containing document metadata as JSON
+        List with TextContent containing document metadata as JSON or TOON
     """
     file_path_str = arguments.get("file_path")
+    output_format = arguments.get("output_format", DEFAULT_OUTPUT_FORMAT)
 
     # Validate path
     file_path = _validate_file_path(file_path_str)
@@ -897,19 +1004,36 @@ async def _handle_extract_metadata(arguments: Dict[str, Any]) -> List[TextConten
     # Extract raw document (we only need metadata)
     raw_doc = extractor.extract(str(file_path))
 
-    # Build response
+    # Get format-specific info
+    extension = file_path.suffix.lower()
+    text_length = len(raw_doc.text)
+    page_count = None
+
+    if extension == ".pdf" and raw_doc.structure:
+        pages = raw_doc.structure.get("pages", [])
+        page_count = len(pages)
+
+    # TOON format output
+    if output_format == OUTPUT_FORMAT_TOON:
+        toon_output = TOONFormatter.format_metadata_only(
+            file_path=str(file_path),
+            metadata=raw_doc.metadata,
+            doc_type=extension[1:] if extension else "unknown",
+            total_chars=text_length,
+            page_count=page_count
+        )
+        return [TextContent(type="text", text=toon_output)]
+
+    # JSON format output (default)
     response: Dict[str, Any] = {
         "success": True,
         "file_path": str(file_path),
         "metadata": raw_doc.metadata,
         "document_info": {
-            "text_length": len(raw_doc.text),
+            "text_length": text_length,
             "has_structure": raw_doc.structure is not None,
         }
     }
-
-    # Add format-specific info
-    extension = file_path.suffix.lower()
 
     if extension == ".pdf" and raw_doc.structure:
         pages = raw_doc.structure.get("pages", [])
