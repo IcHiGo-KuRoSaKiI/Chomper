@@ -6,9 +6,9 @@ Chunks PDF documents while preserving:
 - X/Y coordinates (reading order)
 - Text → Image → Text order
 """
-from typing import List
+
+from ...models.document import Chunk, RawDocument
 from ..base import BaseChunker
-from ...models.document import RawDocument, Chunk
 
 
 class PDFChunker(BaseChunker):
@@ -41,7 +41,7 @@ class PDFChunker(BaseChunker):
         super().__init__(target_size, overlap, preserve_context)
         self.chunk_by_page = chunk_by_page
 
-    def chunk(self, raw_doc: RawDocument) -> List[Chunk]:
+    def chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """
         Chunk PDF document.
 
@@ -108,7 +108,7 @@ class PDFChunker(BaseChunker):
             }
         )
 
-    def _chunk_page_content(self, start_chunk_id: int, page: dict) -> List[Chunk]:
+    def _chunk_page_content(self, start_chunk_id: int, page: dict) -> list[Chunk]:
         """
         Chunk page content by size while preserving order.
 
@@ -167,8 +167,8 @@ class PDFChunker(BaseChunker):
     def _finalize_chunk(
         self,
         chunk_id: int,
-        words: List[str],
-        items: List[dict],
+        words: list[str],
+        items: list[dict],
         page_number: int
     ) -> Chunk:
         """

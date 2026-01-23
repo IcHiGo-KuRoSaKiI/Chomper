@@ -3,13 +3,13 @@ Extractors for email formats: EML and MSG.
 
 Handles standard .eml files (RFC 822) and Outlook .msg files.
 """
-import email
 from email import policy
 from email.parser import BytesParser
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from .base import BaseExtractor
+from typing import Any
+
 from ..models.document import RawDocument
+from .base import BaseExtractor
 
 # Optional import for MSG files
 try:
@@ -120,7 +120,7 @@ class EMLExtractor(BaseExtractor):
             }
         )
 
-    def _extract_headers(self, msg) -> Dict[str, str]:
+    def _extract_headers(self, msg) -> dict[str, str]:
         """Extract common email headers."""
         headers = {}
         header_names = ['from', 'to', 'cc', 'bcc', 'subject', 'date', 'message-id', 'reply-to']
@@ -177,7 +177,7 @@ class EMLExtractor(BaseExtractor):
 
         return body_text, body_html
 
-    def _extract_attachments(self, msg) -> List[Dict[str, Any]]:
+    def _extract_attachments(self, msg) -> list[dict[str, Any]]:
         """Extract attachment information (not content)."""
         attachments = []
 

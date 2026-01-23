@@ -5,8 +5,8 @@ Extracts text and metadata from CSV/TSV files.
 Handles encoding detection, delimiter detection, and large files.
 """
 import logging
-from typing import Dict, Any, Optional
 from pathlib import Path
+from typing import Any
 
 try:
     import pandas as pd
@@ -20,9 +20,9 @@ try:
 except ImportError:
     CHARDET_AVAILABLE = False
 
-from .base import BaseExtractor
 from ..models.document import RawDocument
-from ..models.excel_models import CSVMetadata, TableRange, SheetInfo
+from ..models.excel_models import CSVMetadata
+from .base import BaseExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +43,9 @@ class CSVExtractor(BaseExtractor):
 
     def __init__(
         self,
-        delimiter: Optional[str] = None,
-        encoding: Optional[str] = None,
-        has_header: Optional[bool] = None,
+        delimiter: str | None = None,
+        encoding: str | None = None,
+        has_header: bool | None = None,
         sample_size: int = 5000
     ):
         """
@@ -196,10 +196,10 @@ class CSVExtractor(BaseExtractor):
             Detected delimiter (defaults to ',')
         """
         try:
-            with open(file_path, 'r', encoding=encoding) as f:
+            with open(file_path, encoding=encoding) as f:
                 # Read first few lines
                 sample_lines = [f.readline() for _ in range(5) if f.readable()]
-                sample = ''.join(sample_lines)
+                ''.join(sample_lines)
 
             # Try common delimiters
             delimiters = [',', ';', '\t', '|']
@@ -225,7 +225,7 @@ class CSVExtractor(BaseExtractor):
             logger.warning(f"Delimiter detection failed: {e}, defaulting to comma")
             return ','
 
-    def _infer_column_types(self, df: 'pd.DataFrame') -> Dict[str, str]:
+    def _infer_column_types(self, df: 'pd.DataFrame') -> dict[str, str]:
         """
         Infer data types for each column.
 
@@ -311,7 +311,7 @@ class CSVExtractor(BaseExtractor):
 
         return "\n".join(lines)
 
-    def _extract_csv_metadata(self, csv_metadata: CSVMetadata) -> Dict[str, Any]:
+    def _extract_csv_metadata(self, csv_metadata: CSVMetadata) -> dict[str, Any]:
         """
         Extract CSV-specific metadata.
 

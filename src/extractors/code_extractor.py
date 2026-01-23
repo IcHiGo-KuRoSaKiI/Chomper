@@ -5,11 +5,11 @@ Extracts code structure (imports, functions, classes) from source files.
 """
 import ast
 import re
-from typing import Dict, Any, List
 from pathlib import Path
+from typing import Any
 
-from .base import BaseExtractor
 from ..models.document import RawDocument
+from .base import BaseExtractor
 
 
 class CodeExtractor(BaseExtractor):
@@ -63,7 +63,7 @@ class CodeExtractor(BaseExtractor):
         self.validate_file(file_path)
 
         # Read file content
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(file_path, encoding='utf-8', errors='ignore') as f:
             content = f.read()
 
         # Detect language
@@ -90,7 +90,7 @@ class CodeExtractor(BaseExtractor):
             structure=structure
         )
 
-    def _extract_python_structure(self, content: str) -> Dict[str, Any]:
+    def _extract_python_structure(self, content: str) -> dict[str, Any]:
         """
         Extract Python code structure using AST.
 
@@ -175,7 +175,7 @@ class CodeExtractor(BaseExtractor):
 
         return structure
 
-    def _extract_generic_structure(self, content: str, language: str) -> Dict[str, Any]:
+    def _extract_generic_structure(self, content: str, language: str) -> dict[str, Any]:
         """
         Extract code structure using regex (for non-Python languages).
 

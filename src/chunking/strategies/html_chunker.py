@@ -8,12 +8,12 @@ Provides 4 chunking strategies for HTML documents:
 4. auto: Intelligent selection based on document structure
 """
 import logging
-from typing import List, Optional, Dict, Any
 import re
+from typing import Any
 
+from ...models.document import Chunk, RawDocument
+from ...models.html_models import HTMLDocument, HTMLTable
 from ..base import BaseChunker
-from ...models.document import RawDocument, Chunk
-from ...models.html_models import HTMLDocument, HTMLSection, HTMLTable
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ class HTMLChunker(BaseChunker):
         self.preserve_headings = preserve_headings
         self.overlap_size = overlap_size
 
-    def chunk(self, raw_doc: RawDocument) -> List[Chunk]:
+    def chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """
         Chunk HTML document using selected strategy.
 
@@ -137,8 +137,8 @@ class HTMLChunker(BaseChunker):
     def _chunk_semantic(
         self,
         html_doc: HTMLDocument,
-        metadata: Dict[str, Any]
-    ) -> List[Chunk]:
+        metadata: dict[str, Any]
+    ) -> list[Chunk]:
         """
         Chunk by semantic HTML sections.
 
@@ -191,8 +191,8 @@ class HTMLChunker(BaseChunker):
         self,
         full_text: str,
         html_doc: HTMLDocument,
-        metadata: Dict[str, Any]
-    ) -> List[Chunk]:
+        metadata: dict[str, Any]
+    ) -> list[Chunk]:
         """
         Chunk by heading hierarchy.
 
@@ -286,8 +286,8 @@ class HTMLChunker(BaseChunker):
     def _chunk_fixed_size(
         self,
         text: str,
-        metadata: Dict[str, Any]
-    ) -> List[Chunk]:
+        metadata: dict[str, Any]
+    ) -> list[Chunk]:
         """
         Chunk by fixed character count with paragraph boundaries.
 
@@ -377,9 +377,9 @@ class HTMLChunker(BaseChunker):
 
     def _chunk_tables(
         self,
-        tables: List[HTMLTable],
-        metadata: Dict[str, Any]
-    ) -> List[Chunk]:
+        tables: list[HTMLTable],
+        metadata: dict[str, Any]
+    ) -> list[Chunk]:
         """
         Extract tables as separate chunks.
 

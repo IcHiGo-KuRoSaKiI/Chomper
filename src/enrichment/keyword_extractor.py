@@ -5,11 +5,11 @@ Extracts important keywords from chunks using:
 - TF-IDF (Term Frequency-Inverse Document Frequency)
 - RAKE (Rapid Automatic Keyword Extraction)
 """
-from typing import List
 import re
 from collections import Counter
-from .base import BaseEnricher
+
 from ..models.document import Chunk, EnrichedChunk
+from .base import BaseEnricher
 
 
 class KeywordExtractor(BaseEnricher):
@@ -35,7 +35,7 @@ class KeywordExtractor(BaseEnricher):
         if self.method not in ["tfidf", "rake"]:
             raise ValueError(f"Unknown method: {method}. Use 'tfidf' or 'rake'")
 
-    def enrich(self, chunks: List[Chunk]) -> List[EnrichedChunk]:
+    def enrich(self, chunks: list[Chunk]) -> list[EnrichedChunk]:
         """
         Extract keywords from chunks.
 
@@ -66,7 +66,7 @@ class KeywordExtractor(BaseEnricher):
 
         return enriched_chunks
 
-    def _rake_keywords(self, text: str) -> List[str]:
+    def _rake_keywords(self, text: str) -> list[str]:
         """
         RAKE (Rapid Automatic Keyword Extraction) - regex-based.
 
@@ -145,7 +145,7 @@ class KeywordExtractor(BaseEnricher):
         sorted_phrases = sorted(phrase_scores.items(), key=lambda x: x[1], reverse=True)
         return [phrase for phrase, score in sorted_phrases if len(phrase.split()) <= 4]
 
-    def _tfidf_keywords(self, texts: List[str]) -> List[str]:
+    def _tfidf_keywords(self, texts: list[str]) -> list[str]:
         """
         TF-IDF keyword extraction using sklearn.
 

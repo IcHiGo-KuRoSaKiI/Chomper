@@ -4,7 +4,7 @@ Base class for enrichers.
 All enrichers inherit from BaseEnricher.
 """
 from abc import ABC, abstractmethod
-from typing import List
+
 from ..models.document import Chunk, EnrichedChunk
 
 
@@ -17,7 +17,7 @@ class BaseEnricher(ABC):
     """
 
     @abstractmethod
-    def enrich(self, chunks: List[Chunk]) -> List[EnrichedChunk]:
+    def enrich(self, chunks: list[Chunk]) -> list[EnrichedChunk]:
         """
         Enrich chunks with additional metadata.
 

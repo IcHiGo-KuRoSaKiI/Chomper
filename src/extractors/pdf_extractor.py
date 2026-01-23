@@ -4,14 +4,16 @@ PDF extractor using PyMuPDF and PyMuPDF4LLM.
 Extracts text (with proper Markdown formatting including tables),
 images, and layout from PDF documents.
 """
-import fitz
-from typing import Dict, Any, List
-from PIL import Image
-import io
 import base64
+import io
 import logging
-from .base import BaseExtractor
+from typing import Any
+
+import fitz
+from PIL import Image
+
 from ..models.document import RawDocument
+from .base import BaseExtractor
 
 # Try to import pymupdf4llm for better markdown output
 try:
@@ -156,7 +158,7 @@ class PDFExtractor(BaseExtractor):
         full_text = "\n\n".join(text_parts)
         return full_text, pages
 
-    def _extract_page_images(self, pdf_document, page_idx: int) -> List[Dict[str, Any]]:
+    def _extract_page_images(self, pdf_document, page_idx: int) -> list[dict[str, Any]]:
         """
         Extract images from a specific page.
 
@@ -217,7 +219,7 @@ class PDFExtractor(BaseExtractor):
 
         return images
 
-    def _extract_pages(self, pdf_document) -> List[Dict[str, Any]]:
+    def _extract_pages(self, pdf_document) -> list[dict[str, Any]]:
         """
         Extract all pages from PDF (fallback method without pymupdf4llm).
 
@@ -263,7 +265,7 @@ class PDFExtractor(BaseExtractor):
 
         return pages
 
-    def _sort_content_by_position(self, content: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _sort_content_by_position(self, content: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
         Sort content by position (reading order).
 
@@ -292,7 +294,7 @@ class PDFExtractor(BaseExtractor):
 
         return sorted(content, key=get_sort_key)
 
-    def _combine_page_content(self, content: List[Dict[str, Any]]) -> str:
+    def _combine_page_content(self, content: list[dict[str, Any]]) -> str:
         """
         Combine page content into text (fallback method).
 
@@ -312,7 +314,7 @@ class PDFExtractor(BaseExtractor):
 
         return "\n".join(text_parts)
 
-    def _extract_pdf_metadata(self, pdf_document) -> Dict[str, Any]:
+    def _extract_pdf_metadata(self, pdf_document) -> dict[str, Any]:
         """
         Extract PDF metadata.
 

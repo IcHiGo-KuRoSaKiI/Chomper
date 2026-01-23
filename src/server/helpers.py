@@ -6,11 +6,11 @@ import json
 import re
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from mcp.types import TextContent
 
-from .config import EXTRACTORS, CHUNKERS
+from .config import CHUNKERS, EXTRACTORS
 
 
 def validate_file_path(file_path: str) -> Path:
@@ -40,7 +40,7 @@ def validate_file_path(file_path: str) -> Path:
     return path
 
 
-def parse_from_base64(content_base64: str, filename: str) -> Tuple[Path, None]:
+def parse_from_base64(content_base64: str, filename: str) -> tuple[Path, None]:
     """
     Decode base64 content and write to a temporary file.
 
@@ -140,10 +140,10 @@ def get_chunker_for_file(
 
 
 def extract_images_from_structure(
-    structure: Optional[Dict[str, Any]],
-    page_filter: Optional[int] = None,
-    max_images: Optional[int] = None
-) -> List[Dict[str, Any]]:
+    structure: dict[str, Any] | None,
+    page_filter: int | None = None,
+    max_images: int | None = None
+) -> list[dict[str, Any]]:
     """
     Extract images from PDF structure.
 
@@ -222,7 +222,7 @@ def detect_mime_type(base64_data: str) -> str:
         return "image/png"
 
 
-def format_error_response(error: Exception) -> List[TextContent]:
+def format_error_response(error: Exception) -> list[TextContent]:
     """
     Format error response as TextContent list.
 
@@ -240,7 +240,7 @@ def format_error_response(error: Exception) -> List[TextContent]:
     return [TextContent(type="text", text=json.dumps(error_data, indent=2))]
 
 
-def chunk_to_dict(chunk: Any) -> Dict[str, Any]:
+def chunk_to_dict(chunk: Any) -> dict[str, Any]:
     """
     Convert chunk to dictionary.
 

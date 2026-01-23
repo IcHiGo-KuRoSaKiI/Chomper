@@ -12,9 +12,10 @@ TOON Schema:
     <text content>
     k:<keyword1>,<keyword2>
 """
-from typing import Dict, Any, List, Optional
+from typing import Any
+
+from ..models.document import EnrichedChunk, ProcessedDocument
 from .base import BaseFormatter
-from ..models.document import ProcessedDocument, EnrichedChunk
 
 
 class TOONFormatter(BaseFormatter):
@@ -41,7 +42,7 @@ class TOONFormatter(BaseFormatter):
         self,
         include_metadata: bool = True,
         include_keywords: bool = True,
-        max_text_preview: Optional[int] = None
+        max_text_preview: int | None = None
     ):
         """
         Initialize TOON formatter.
@@ -107,7 +108,7 @@ class TOONFormatter(BaseFormatter):
 
         return self.FIELD_DELIMITER.join(parts)
 
-    def _format_metadata(self, metadata: Dict[str, Any]) -> Optional[str]:
+    def _format_metadata(self, metadata: dict[str, Any]) -> str | None:
         """Format metadata as key=value pairs."""
         # Select important metadata fields only
         important_keys = ["author", "title", "created", "modified", "subject"]
@@ -123,7 +124,7 @@ class TOONFormatter(BaseFormatter):
             return f"m:{self.LIST_DELIMITER.join(pairs)}"
         return None
 
-    def _format_chunk(self, chunk: EnrichedChunk) -> List[str]:
+    def _format_chunk(self, chunk: EnrichedChunk) -> list[str]:
         """Format single chunk as TOON lines."""
         lines = []
 
@@ -161,7 +162,7 @@ class TOONFormatter(BaseFormatter):
             return ""
         return text.replace(",", "\\,").replace("=", "\\=").replace("\n", " ")
 
-    def format_chunks(self, chunks: List[EnrichedChunk]) -> str:
+    def format_chunks(self, chunks: list[EnrichedChunk]) -> str:
         """Format just chunks without document wrapper."""
         lines = []
         for chunk in chunks:
@@ -173,14 +174,14 @@ class TOONFormatter(BaseFormatter):
     def format_raw(
         file_path: str,
         text: str,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
         doc_type: str,
         total_chars: int,
         total_words: int,
-        page_count: Optional[int] = None,
-        image_count: Optional[int] = None,
+        page_count: int | None = None,
+        image_count: int | None = None,
         truncated: bool = False,
-        continuation_offset: Optional[int] = None
+        continuation_offset: int | None = None
     ) -> str:
         """
         Format raw document data as TOON (for server use without full pipeline).
@@ -237,10 +238,10 @@ class TOONFormatter(BaseFormatter):
     @staticmethod
     def format_metadata_only(
         file_path: str,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
         doc_type: str,
         total_chars: int,
-        page_count: Optional[int] = None
+        page_count: int | None = None
     ) -> str:
         """
         Format metadata-only response as TOON.

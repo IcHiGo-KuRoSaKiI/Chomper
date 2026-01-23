@@ -4,7 +4,8 @@ Base class for output formatters.
 All formatters inherit from BaseFormatter.
 """
 from abc import ABC, abstractmethod
-from typing import List, Any
+from typing import Any
+
 from ..models.document import EnrichedChunk, ProcessedDocument
 
 
@@ -32,7 +33,7 @@ class BaseFormatter(ABC):
         """
         pass
 
-    def format_chunks(self, chunks: List[EnrichedChunk]) -> Any:
+    def format_chunks(self, chunks: list[EnrichedChunk]) -> Any:
         """
         Format just the chunks (without document wrapper).
 

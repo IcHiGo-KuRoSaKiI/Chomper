@@ -7,9 +7,9 @@ Chunks code files while preserving:
 - Import sections
 - Logical code units
 """
-from typing import List
+
+from ...models.document import Chunk, RawDocument
 from ..base import BaseChunker
-from ...models.document import RawDocument, Chunk
 
 
 class CodeChunker(BaseChunker):
@@ -39,7 +39,7 @@ class CodeChunker(BaseChunker):
         """
         super().__init__(target_size, overlap, preserve_context)
 
-    def chunk(self, raw_doc: RawDocument) -> List[Chunk]:
+    def chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """
         Chunk code document.
 
@@ -90,8 +90,8 @@ class CodeChunker(BaseChunker):
     def _create_imports_chunk(
         self,
         chunk_id: int,
-        imports: List[dict],
-        lines: List[str],
+        imports: list[dict],
+        lines: list[str],
         language: str
     ) -> Chunk:
         """
@@ -135,9 +135,9 @@ class CodeChunker(BaseChunker):
         self,
         start_chunk_id: int,
         func: dict,
-        lines: List[str],
+        lines: list[str],
         language: str
-    ) -> List[Chunk]:
+    ) -> list[Chunk]:
         """
         Chunk a function.
 
@@ -212,9 +212,9 @@ class CodeChunker(BaseChunker):
         self,
         start_chunk_id: int,
         cls: dict,
-        lines: List[str],
+        lines: list[str],
         language: str
-    ) -> List[Chunk]:
+    ) -> list[Chunk]:
         """
         Chunk a class.
 
@@ -285,7 +285,7 @@ class CodeChunker(BaseChunker):
 
         return chunks
 
-    def _simple_chunk(self, raw_doc: RawDocument) -> List[Chunk]:
+    def _simple_chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """
         Fallback to simple chunking if no structure available.
 

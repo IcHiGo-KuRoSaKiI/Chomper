@@ -5,6 +5,7 @@ All format-specific extractors inherit from BaseExtractor.
 """
 from abc import ABC, abstractmethod
 from pathlib import Path
+
 from ..models.document import RawDocument
 
 

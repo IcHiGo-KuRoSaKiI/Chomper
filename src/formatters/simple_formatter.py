@@ -3,9 +3,10 @@ Simple formatter for standalone output.
 
 Outputs plain Python dicts/JSON with no database dependencies.
 """
-from typing import Dict, Any, List
+from typing import Any
+
+from ..models.document import EnrichedChunk, ProcessedDocument
 from .base import BaseFormatter
-from ..models.document import ProcessedDocument, EnrichedChunk
 
 
 class SimpleFormatter(BaseFormatter):
@@ -32,7 +33,7 @@ class SimpleFormatter(BaseFormatter):
         """
         self.include_metadata = include_metadata
 
-    def format(self, document: ProcessedDocument) -> Dict[str, Any]:
+    def format(self, document: ProcessedDocument) -> dict[str, Any]:
         """
         Format document as plain dictionary.
 
@@ -54,7 +55,7 @@ class SimpleFormatter(BaseFormatter):
             "chunks": self._format_chunks(document.chunks)
         }
 
-    def _format_chunks(self, chunks: List[EnrichedChunk]) -> List[Dict[str, Any]]:
+    def _format_chunks(self, chunks: list[EnrichedChunk]) -> list[dict[str, Any]]:
         """
         Format chunks as dictionaries.
 
@@ -86,7 +87,7 @@ class SimpleFormatter(BaseFormatter):
 
         return formatted_chunks
 
-    def format_chunks(self, chunks: List[EnrichedChunk]) -> List[Dict[str, Any]]:
+    def format_chunks(self, chunks: list[EnrichedChunk]) -> list[dict[str, Any]]:
         """
         Format just chunks (without document wrapper).
 

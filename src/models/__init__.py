@@ -1,28 +1,15 @@
 """Data models for document parsing."""
 
-from .document import (
-    RawDocument,
-    Chunk,
-    EnrichedChunk,
-    ProcessedDocument
-)
-
-from .excel_models import (
-    CellInfo,
-    TableRange,
-    SheetInfo,
-    ExcelMetadata,
-    CSVMetadata
-)
-
+from .document import Chunk, EnrichedChunk, ProcessedDocument, RawDocument
+from .excel_models import CellInfo, CSVMetadata, ExcelMetadata, SheetInfo, TableRange
 from .html_models import (
-    HTMLTable,
-    HTMLList,
+    HTMLDocument,
     HTMLForm,
     HTMLLink,
-    HTMLSection,
+    HTMLList,
     HTMLMetadata,
-    HTMLDocument
+    HTMLSection,
+    HTMLTable,
 )
 
 __all__ = [

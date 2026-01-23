@@ -2,11 +2,11 @@
 
 from .base import BaseExtractor
 from .code_extractor import CodeExtractor
-from .text_extractor import TextExtractor
-from .markdown_extractor import MarkdownExtractor
 
 # Data formats (JSON always available, YAML/XML optional)
 from .data_extractor import JSONExtractor
+from .markdown_extractor import MarkdownExtractor
+from .text_extractor import TextExtractor
 
 try:
     from .data_extractor import YAMLExtractor

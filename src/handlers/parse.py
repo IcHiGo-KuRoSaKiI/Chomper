@@ -3,30 +3,30 @@ Parse document handlers for Chomper.
 """
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
-from mcp.types import TextContent, ImageContent
+from mcp.types import ImageContent, TextContent
 
 from src.formatters.toon_formatter import TOONFormatter
 from src.server.config import (
-    DEFAULT_SUMMARY_CHARS,
     DEFAULT_MAX_IMAGES,
-    OUTPUT_FORMAT_TOON,
     DEFAULT_OUTPUT_FORMAT,
+    DEFAULT_SUMMARY_CHARS,
+    OUTPUT_FORMAT_TOON,
 )
 from src.server.helpers import (
-    validate_file_path,
-    parse_from_base64,
-    get_extractor_for_file,
-    remove_image_placeholders,
-    extract_images_from_structure,
     detect_mime_type,
+    extract_images_from_structure,
+    get_extractor_for_file,
+    parse_from_base64,
+    remove_image_placeholders,
+    validate_file_path,
 )
 
 logger = logging.getLogger("chomper")
 
 
-async def handle_parse_document(arguments: Dict[str, Any]) -> List[TextContent | ImageContent]:
+async def handle_parse_document(arguments: dict[str, Any]) -> list[TextContent | ImageContent]:
     """
     Handle parse_document tool call.
 
@@ -86,7 +86,7 @@ async def handle_parse_document(arguments: Dict[str, Any]) -> List[TextContent |
         continuation_offset = DEFAULT_SUMMARY_CHARS
 
     # Build response content list
-    response_items: List[TextContent | ImageContent] = []
+    response_items: list[TextContent | ImageContent] = []
 
     # TOON format output
     if output_format == OUTPUT_FORMAT_TOON:
@@ -110,7 +110,7 @@ async def handle_parse_document(arguments: Dict[str, Any]) -> List[TextContent |
         response_items.append(TextContent(type="text", text=text_content))
 
         # Build metadata
-        metadata_dict: Dict[str, Any] = {
+        metadata_dict: dict[str, Any] = {
             "file_path": str(file_path),
             "total_characters": total_chars,
             "total_words": total_words,
@@ -192,7 +192,7 @@ async def handle_parse_document(arguments: Dict[str, Any]) -> List[TextContent |
     return response_items
 
 
-async def handle_parse_document_bytes(arguments: Dict[str, Any]) -> List[TextContent | ImageContent]:
+async def handle_parse_document_bytes(arguments: dict[str, Any]) -> list[TextContent | ImageContent]:
     """
     Handle parse_document_bytes tool call for base64-encoded documents.
 

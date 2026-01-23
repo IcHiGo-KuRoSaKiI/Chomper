@@ -3,9 +3,10 @@ Text extractor for plain text files.
 
 Extracts content from plain text files with minimal processing.
 """
-from typing import Dict, Any
-from .base import BaseExtractor
+from typing import Any
+
 from ..models.document import RawDocument
+from .base import BaseExtractor
 
 
 class TextExtractor(BaseExtractor):
@@ -42,7 +43,7 @@ class TextExtractor(BaseExtractor):
         self.validate_file(file_path)
 
         # Read file content
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(file_path, encoding='utf-8', errors='ignore') as f:
             content = f.read()
 
         # Detect structure
@@ -63,7 +64,7 @@ class TextExtractor(BaseExtractor):
             structure=structure
         )
 
-    def _detect_paragraphs(self, content: str) -> Dict[str, Any]:
+    def _detect_paragraphs(self, content: str) -> dict[str, Any]:
         """
         Detect paragraph boundaries in text.
 

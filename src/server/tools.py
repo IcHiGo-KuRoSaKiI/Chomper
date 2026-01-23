@@ -1,12 +1,11 @@
 """
 MCP Tool definitions for Chomper.
 """
-from typing import List
 
 from mcp.types import Tool
 
 
-def get_tools() -> List[Tool]:
+def get_tools() -> list[Tool]:
     """
     Get list of available document parsing tools.
 

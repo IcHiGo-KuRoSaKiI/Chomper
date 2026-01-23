@@ -17,32 +17,17 @@ Components:
 """
 
 # Data models
-from .models import (
-    RawDocument,
-    Chunk,
-    EnrichedChunk,
-    ProcessedDocument
-)
-
 # Enrichers
-from .enrichment import (
-    KeywordExtractor,
-    SectionDetector,
-    TitleGenerator,
-    MetadataEnricher
-)
+from .enrichment import KeywordExtractor, MetadataEnricher, SectionDetector, TitleGenerator
 
 # Formatters
-from .formatters import (
-    SimpleFormatter,
-    WeaviateFormatter,
-    Neo4jFormatter
-)
+from .formatters import Neo4jFormatter, SimpleFormatter, WeaviateFormatter
+from .models import Chunk, EnrichedChunk, ProcessedDocument, RawDocument
 
 # Pipeline
 from .pipeline import DocumentPipeline
 
-__version__ = "2.0.0"
+__version__ = "1.0.0"
 
 __all__ = [
     # Models

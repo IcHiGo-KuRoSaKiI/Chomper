@@ -6,9 +6,9 @@ Chunks DOCX documents while preserving:
 - Section boundaries
 - Tables and images in context
 """
-from typing import List
+
+from ...models.document import Chunk, RawDocument
 from ..base import BaseChunker
-from ...models.document import RawDocument, Chunk
 
 
 class DOCXChunker(BaseChunker):
@@ -41,7 +41,7 @@ class DOCXChunker(BaseChunker):
         super().__init__(target_size, overlap, preserve_context)
         self.chunk_by_section = chunk_by_section
 
-    def chunk(self, raw_doc: RawDocument) -> List[Chunk]:
+    def chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """
         Chunk DOCX document.
 
@@ -124,7 +124,7 @@ class DOCXChunker(BaseChunker):
             }
         )
 
-    def _chunk_section_content(self, start_chunk_id: int, section: dict) -> List[Chunk]:
+    def _chunk_section_content(self, start_chunk_id: int, section: dict) -> list[Chunk]:
         """
         Chunk section content by size while preserving structure.
 
@@ -209,8 +209,8 @@ class DOCXChunker(BaseChunker):
     def _finalize_chunk(
         self,
         chunk_id: int,
-        words: List[str],
-        items: List[dict],
+        words: list[str],
+        items: list[dict],
         section_heading: str,
         heading_level: int
     ) -> Chunk:
@@ -246,7 +246,7 @@ class DOCXChunker(BaseChunker):
             }
         )
 
-    def _simple_chunk(self, raw_doc: RawDocument) -> List[Chunk]:
+    def _simple_chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """
         Fallback to simple chunking if no structure available.
 

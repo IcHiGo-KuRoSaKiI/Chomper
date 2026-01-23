@@ -3,26 +3,26 @@ Metadata handlers for Chomper.
 """
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 from mcp.types import TextContent
 
 from src.formatters.toon_formatter import TOONFormatter
 from src.server.config import (
-    OUTPUT_FORMAT_TOON,
     DEFAULT_OUTPUT_FORMAT,
-    FORMAT_DESCRIPTIONS,
     EXTRACTORS,
+    FORMAT_DESCRIPTIONS,
+    OUTPUT_FORMAT_TOON,
 )
 from src.server.helpers import (
-    validate_file_path,
     get_extractor_for_file,
+    validate_file_path,
 )
 
 logger = logging.getLogger("chomper")
 
 
-async def handle_extract_metadata(arguments: Dict[str, Any]) -> List[TextContent]:
+async def handle_extract_metadata(arguments: dict[str, Any]) -> list[TextContent]:
     """
     Handle extract_metadata tool call.
 
@@ -67,7 +67,7 @@ async def handle_extract_metadata(arguments: Dict[str, Any]) -> List[TextContent
         return [TextContent(type="text", text=toon_output)]
 
     # JSON format output (default)
-    response: Dict[str, Any] = {
+    response: dict[str, Any] = {
         "success": True,
         "file_path": str(file_path),
         "metadata": raw_doc.metadata,
@@ -90,7 +90,7 @@ async def handle_extract_metadata(arguments: Dict[str, Any]) -> List[TextContent
     return [TextContent(type="text", text=json.dumps(response, indent=2, default=str))]
 
 
-async def handle_list_supported_formats(_arguments: Dict[str, Any]) -> List[TextContent]:
+async def handle_list_supported_formats(_arguments: dict[str, Any]) -> list[TextContent]:
     """
     Handle list_supported_formats tool call.
 

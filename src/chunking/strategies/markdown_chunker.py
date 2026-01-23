@@ -7,9 +7,9 @@ Chunks Markdown while preserving:
 - Code blocks
 - Lists
 """
-from typing import List
+
+from ...models.document import Chunk, RawDocument
 from ..base import BaseChunker
-from ...models.document import RawDocument, Chunk
 
 
 class MarkdownChunker(BaseChunker):
@@ -42,7 +42,7 @@ class MarkdownChunker(BaseChunker):
         super().__init__(target_size, overlap, preserve_context)
         self.chunk_by_section = chunk_by_section
 
-    def chunk(self, raw_doc: RawDocument) -> List[Chunk]:
+    def chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """
         Chunk Markdown document.
 
@@ -125,7 +125,7 @@ class MarkdownChunker(BaseChunker):
             }
         )
 
-    def _chunk_section_content(self, start_chunk_id: int, section: dict) -> List[Chunk]:
+    def _chunk_section_content(self, start_chunk_id: int, section: dict) -> list[Chunk]:
         """
         Chunk section content by size while preserving structure.
 
@@ -225,7 +225,7 @@ class MarkdownChunker(BaseChunker):
     def _finalize_chunk(
         self,
         chunk_id: int,
-        words: List[str],
+        words: list[str],
         section_heading: str,
         heading_level: int,
         has_code: bool,
@@ -260,7 +260,7 @@ class MarkdownChunker(BaseChunker):
             }
         )
 
-    def _simple_chunk(self, raw_doc: RawDocument) -> List[Chunk]:
+    def _simple_chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """
         Fallback to simple chunking if no structure available.
 

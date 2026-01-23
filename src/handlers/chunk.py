@@ -3,29 +3,29 @@ Chunk document handlers for Chomper.
 """
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 from mcp.types import TextContent
 
-from src.formatters.toon_formatter import TOONFormatter
 from src.chunking.strategies import SemanticChunker, TextChunker
+from src.formatters.toon_formatter import TOONFormatter
 from src.server.config import (
     DEFAULT_CHUNK_LIMIT,
-    OUTPUT_FORMAT_TOON,
     DEFAULT_OUTPUT_FORMAT,
+    OUTPUT_FORMAT_TOON,
 )
 from src.server.helpers import (
-    validate_file_path,
-    get_extractor_for_file,
-    get_chunker_for_file,
-    remove_image_placeholders,
     chunk_to_dict,
+    get_chunker_for_file,
+    get_extractor_for_file,
+    remove_image_placeholders,
+    validate_file_path,
 )
 
 logger = logging.getLogger("chomper")
 
 
-async def handle_get_document_chunk(arguments: Dict[str, Any]) -> List[TextContent]:
+async def handle_get_document_chunk(arguments: dict[str, Any]) -> list[TextContent]:
     """
     Handle get_document_chunk tool call for paginated content retrieval.
 
@@ -90,7 +90,7 @@ async def handle_get_document_chunk(arguments: Dict[str, Any]) -> List[TextConte
         return [TextContent(type="text", text=toon_output)]
 
     # JSON format output (default)
-    response_items: List[TextContent] = []
+    response_items: list[TextContent] = []
 
     # TextContent[0]: The text chunk
     response_items.append(TextContent(type="text", text=chunk_text))
@@ -117,7 +117,7 @@ async def handle_get_document_chunk(arguments: Dict[str, Any]) -> List[TextConte
     return response_items
 
 
-async def handle_parse_document_chunked(arguments: Dict[str, Any]) -> List[TextContent]:
+async def handle_parse_document_chunked(arguments: dict[str, Any]) -> list[TextContent]:
     """
     Handle parse_document_chunked tool call.
 
@@ -216,7 +216,7 @@ async def handle_parse_document_chunked(arguments: Dict[str, Any]) -> List[TextC
         return [TextContent(type="text", text="\n".join(lines))]
 
     # JSON format output (default)
-    response: Dict[str, Any] = {
+    response: dict[str, Any] = {
         "success": True,
         "file_path": str(file_path),
         "chunk_size": chunk_size,

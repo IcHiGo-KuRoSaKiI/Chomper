@@ -4,42 +4,33 @@ Document processing pipeline.
 Orchestrates the full document processing workflow:
 Extraction → Chunking → Enrichment → Formatting
 """
-from typing import Optional, List, Any
 from pathlib import Path
+from typing import Any
 
-from .models.document import RawDocument, Chunk, EnrichedChunk, ProcessedDocument
-from .extractors import (
-    PDFExtractor,
-    DOCXExtractor,
-    PPTXExtractor,
-    CodeExtractor,
-    TextExtractor,
-    MarkdownExtractor,
-    ExcelExtractor,
-    CSVExtractor,
-    HTMLExtractor
-)
 from .chunking.strategies import (
-    PDFChunker,
-    DOCXChunker,
-    PPTXChunker,
     CodeChunker,
-    TextChunker,
-    MarkdownChunker,
+    DOCXChunker,
     ExcelChunker,
-    HTMLChunker
+    HTMLChunker,
+    MarkdownChunker,
+    PDFChunker,
+    PPTXChunker,
+    TextChunker,
 )
-from .enrichment import (
-    KeywordExtractor,
-    SectionDetector,
-    TitleGenerator,
-    MetadataEnricher
+from .enrichment import KeywordExtractor, MetadataEnricher, SectionDetector, TitleGenerator
+from .extractors import (
+    CodeExtractor,
+    CSVExtractor,
+    DOCXExtractor,
+    ExcelExtractor,
+    HTMLExtractor,
+    MarkdownExtractor,
+    PDFExtractor,
+    PPTXExtractor,
+    TextExtractor,
 )
-from .formatters import (
-    SimpleFormatter,
-    WeaviateFormatter,
-    Neo4jFormatter
-)
+from .formatters import SimpleFormatter
+from .models.document import Chunk, EnrichedChunk, ProcessedDocument
 
 
 class DocumentPipeline:
@@ -159,8 +150,8 @@ class DocumentPipeline:
 
     def __init__(
         self,
-        enrichers: Optional[List[Any]] = None,
-        formatter: Optional[Any] = None,
+        enrichers: list[Any] | None = None,
+        formatter: Any | None = None,
         skip_enrichment_for_code: bool = True
     ):
         """
@@ -194,7 +185,7 @@ class DocumentPipeline:
         if DocumentPipeline.CHUNKERS is None:
             DocumentPipeline.CHUNKERS = DocumentPipeline._build_chunkers()
 
-    def process(self, file_path: str, doc_id: Optional[str] = None) -> Any:
+    def process(self, file_path: str, doc_id: str | None = None) -> Any:
         """
         Process a document through the full pipeline.
 
@@ -256,7 +247,7 @@ class DocumentPipeline:
 
         return self.formatter.format(processed_doc)
 
-    def _enrich_chunks(self, chunks: List[Chunk]) -> List[EnrichedChunk]:
+    def _enrich_chunks(self, chunks: list[Chunk]) -> list[EnrichedChunk]:
         """
         Apply enrichment to chunks.
 
@@ -273,7 +264,7 @@ class DocumentPipeline:
 
         return enriched
 
-    def get_supported_formats(self) -> List[str]:
+    def get_supported_formats(self) -> list[str]:
         """
         Get list of supported file formats.
 

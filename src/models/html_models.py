@@ -5,8 +5,8 @@ Data structures for representing HTML document structure, metadata,
 and extracted elements (tables, lists, forms, etc.).
 """
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Any
 from datetime import datetime
+from typing import Any
 
 
 @dataclass
@@ -23,9 +23,9 @@ class HTMLTable:
         num_cols: Number of columns
         table_index: Index of table in document
     """
-    headers: List[str] = field(default_factory=list)
-    rows: List[List[str]] = field(default_factory=list)
-    caption: Optional[str] = None
+    headers: list[str] = field(default_factory=list)
+    rows: list[list[str]] = field(default_factory=list)
+    caption: str | None = None
     has_headers: bool = True
     table_index: int = 0
 
@@ -87,7 +87,7 @@ class HTMLList:
         list_index: Index of list in document
         nested_depth: Nesting level (0 for top-level)
     """
-    items: List[str] = field(default_factory=list)
+    items: list[str] = field(default_factory=list)
     is_ordered: bool = False
     list_index: int = 0
     nested_depth: int = 0
@@ -116,11 +116,11 @@ class HTMLForm:
         field_types: Dict mapping field name to input type
         form_index: Index of form in document
     """
-    form_id: Optional[str] = None
-    action: Optional[str] = None
+    form_id: str | None = None
+    action: str | None = None
     method: str = "GET"
-    fields: List[str] = field(default_factory=list)
-    field_types: Dict[str, str] = field(default_factory=dict)
+    fields: list[str] = field(default_factory=list)
+    field_types: dict[str, str] = field(default_factory=dict)
     form_index: int = 0
 
     @property
@@ -162,10 +162,10 @@ class HTMLSection:
         section_index: Index of section in document
     """
     tag: str
-    heading: Optional[str] = None
-    heading_level: Optional[int] = None
+    heading: str | None = None
+    heading_level: int | None = None
     text: str = ""
-    subsections: List['HTMLSection'] = field(default_factory=list)
+    subsections: list['HTMLSection'] = field(default_factory=list)
     start_char: int = 0
     end_char: int = 0
     section_index: int = 0
@@ -199,17 +199,17 @@ class HTMLMetadata:
         twitter_card: Twitter Card metadata
         schema_org: Schema.org structured data
     """
-    title: Optional[str] = None
-    description: Optional[str] = None
-    author: Optional[str] = None
-    publish_date: Optional[datetime] = None
-    modified_date: Optional[datetime] = None
-    keywords: List[str] = field(default_factory=list)
-    language: Optional[str] = None
-    canonical_url: Optional[str] = None
-    open_graph: Dict[str, str] = field(default_factory=dict)
-    twitter_card: Dict[str, str] = field(default_factory=dict)
-    schema_org: List[Dict[str, Any]] = field(default_factory=list)
+    title: str | None = None
+    description: str | None = None
+    author: str | None = None
+    publish_date: datetime | None = None
+    modified_date: datetime | None = None
+    keywords: list[str] = field(default_factory=list)
+    language: str | None = None
+    canonical_url: str | None = None
+    open_graph: dict[str, str] = field(default_factory=dict)
+    twitter_card: dict[str, str] = field(default_factory=dict)
+    schema_org: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -231,13 +231,13 @@ class HTMLDocument:
         has_nav: Whether document has <nav> tag
         num_headings: Number of heading elements (h1-h6)
     """
-    url: Optional[str] = None
+    url: str | None = None
     metadata: HTMLMetadata = field(default_factory=HTMLMetadata)
-    sections: List[HTMLSection] = field(default_factory=list)
-    tables: List[HTMLTable] = field(default_factory=list)
-    lists: List[HTMLList] = field(default_factory=list)
-    forms: List[HTMLForm] = field(default_factory=list)
-    links: List[HTMLLink] = field(default_factory=list)
+    sections: list[HTMLSection] = field(default_factory=list)
+    tables: list[HTMLTable] = field(default_factory=list)
+    lists: list[HTMLList] = field(default_factory=list)
+    forms: list[HTMLForm] = field(default_factory=list)
+    links: list[HTMLLink] = field(default_factory=list)
     main_content: str = ""
     full_text: str = ""
     has_article: bool = False

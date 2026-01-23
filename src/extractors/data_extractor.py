@@ -6,9 +6,10 @@ providing both readable text output and structure metadata.
 """
 import json
 from pathlib import Path
-from typing import Any, Dict, List
-from .base import BaseExtractor
+from typing import Any
+
 from ..models.document import RawDocument
+from .base import BaseExtractor
 
 # Optional imports with graceful fallback
 try:
@@ -84,7 +85,7 @@ class JSONExtractor(BaseExtractor):
             }
         )
 
-    def _analyze_structure(self, data: Any, depth: int = 0) -> Dict[str, Any]:
+    def _analyze_structure(self, data: Any, depth: int = 0) -> dict[str, Any]:
         """Analyze JSON structure recursively."""
         result = {
             "total_keys": 0,
@@ -304,7 +305,7 @@ class XMLExtractor(BaseExtractor):
             tag = tag.split('}', 1)[1]
         return tag
 
-    def _extract_text_recursive(self, element, text_parts: List[str], depth: int = 0) -> None:
+    def _extract_text_recursive(self, element, text_parts: list[str], depth: int = 0) -> None:
         """Recursively extract text content from XML elements."""
         # Get direct text
         if element.text and element.text.strip():
@@ -318,7 +319,7 @@ class XMLExtractor(BaseExtractor):
             if child.tail and child.tail.strip():
                 text_parts.append(child.tail.strip())
 
-    def _analyze_structure(self, element, depth: int = 0) -> Dict[str, Any]:
+    def _analyze_structure(self, element, depth: int = 0) -> dict[str, Any]:
         """Analyze XML structure recursively."""
         result = {
             "element_count": 1,

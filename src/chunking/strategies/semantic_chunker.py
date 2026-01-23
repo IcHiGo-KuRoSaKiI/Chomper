@@ -4,12 +4,10 @@ Semantic chunker using sentence embeddings.
 This chunker uses sentence-transformers to create embeddings and finds
 semantic boundaries based on cosine similarity between adjacent text units.
 """
-import re
-from typing import List, Optional, Tuple
 import numpy as np
 
+from ...models.document import Chunk, RawDocument
 from ..base import BaseChunker
-from ...models.document import RawDocument, Chunk
 
 # Lazy loading for sentence-transformers
 _model_cache = {}
@@ -110,7 +108,7 @@ class SemanticChunker(BaseChunker):
             self._model = _get_embedding_model(self.model_name)
         return self._model
 
-    def chunk(self, raw_doc: RawDocument) -> List[Chunk]:
+    def chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """
         Split document into semantically coherent chunks.
 
@@ -154,7 +152,7 @@ class SemanticChunker(BaseChunker):
 
         return chunks
 
-    def _split_into_units(self, text: str) -> List[Tuple[str, int, int]]:
+    def _split_into_units(self, text: str) -> list[tuple[str, int, int]]:
         """
         Split text into small units (sentences or paragraphs).
 
@@ -197,7 +195,7 @@ class SemanticChunker(BaseChunker):
 
         return units
 
-    def _compute_embeddings(self, units: List[Tuple[str, int, int]]) -> np.ndarray:
+    def _compute_embeddings(self, units: list[tuple[str, int, int]]) -> np.ndarray:
         """
         Compute embeddings for all text units.
 
@@ -211,7 +209,7 @@ class SemanticChunker(BaseChunker):
         embeddings = self.model.encode(texts, convert_to_numpy=True)
         return embeddings
 
-    def _calculate_distances(self, embeddings: np.ndarray) -> List[float]:
+    def _calculate_distances(self, embeddings: np.ndarray) -> list[float]:
         """
         Calculate cosine distances between adjacent embeddings.
 
@@ -232,7 +230,7 @@ class SemanticChunker(BaseChunker):
             distances.append(distance)
         return distances
 
-    def _find_breakpoints(self, distances: List[float]) -> List[int]:
+    def _find_breakpoints(self, distances: list[float]) -> list[int]:
         """
         Find indices where semantic breaks should occur.
 
@@ -275,9 +273,9 @@ class SemanticChunker(BaseChunker):
     def _create_chunks_from_breakpoints(
         self,
         text: str,
-        units: List[Tuple[str, int, int]],
-        breakpoints: List[int]
-    ) -> List[Chunk]:
+        units: list[tuple[str, int, int]],
+        breakpoints: list[int]
+    ) -> list[Chunk]:
         """
         Create chunks using the detected breakpoints.
 

@@ -2,8 +2,9 @@
 Tests for TOON (Token-Optimized Object Notation) formatter.
 """
 import pytest
+
 from src.formatters.toon_formatter import TOONFormatter
-from src.models.document import ProcessedDocument, EnrichedChunk
+from src.models.document import EnrichedChunk, ProcessedDocument
 
 
 class TestTOONFormatter:

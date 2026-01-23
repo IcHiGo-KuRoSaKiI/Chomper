@@ -12,13 +12,11 @@ from pathlib import Path
 parent_dir = Path(__file__).parent.parent.absolute()
 sys.path.insert(0, str(parent_dir.parent))
 
-from src.models.document import RawDocument, Chunk, EnrichedChunk, ProcessedDocument
-from src.extractors import CodeExtractor, TextExtractor, MarkdownExtractor
-from src.chunking.strategies import CodeChunker, TextChunker, MarkdownChunker
-from src.enrichment import KeywordExtractor, SectionDetector, TitleGenerator, MetadataEnricher
-from src.formatters import SimpleFormatter, WeaviateFormatter, Neo4jFormatter
+from src.enrichment import KeywordExtractor, MetadataEnricher, TitleGenerator
+from src.extractors import CodeExtractor, MarkdownExtractor, TextExtractor
+from src.formatters import Neo4jFormatter, SimpleFormatter, WeaviateFormatter
+from src.models.document import Chunk, EnrichedChunk, ProcessedDocument, RawDocument
 from src.pipeline import DocumentPipeline
-
 
 print("\n" + "=" * 70)
 print("LIGHTWEIGHT PARSER SYSTEM TEST")

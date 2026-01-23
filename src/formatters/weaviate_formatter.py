@@ -3,9 +3,10 @@ Weaviate formatter for vector database ingestion.
 
 Outputs Weaviate-ready objects with proper schema.
 """
-from typing import Dict, Any, List
+from typing import Any
+
+from ..models.document import EnrichedChunk, ProcessedDocument
 from .base import BaseFormatter
-from ..models.document import ProcessedDocument, EnrichedChunk
 
 
 class WeaviateFormatter(BaseFormatter):
@@ -40,7 +41,7 @@ class WeaviateFormatter(BaseFormatter):
         self.unpack_metadata = unpack_metadata
         self.include_embeddings = include_embeddings
 
-    def format(self, document: ProcessedDocument) -> List[Dict[str, Any]]:
+    def format(self, document: ProcessedDocument) -> list[dict[str, Any]]:
         """
         Format document as Weaviate objects.
 
@@ -60,7 +61,7 @@ class WeaviateFormatter(BaseFormatter):
 
         return weaviate_objects
 
-    def _format_chunk(self, chunk: EnrichedChunk, document: ProcessedDocument) -> Dict[str, Any]:
+    def _format_chunk(self, chunk: EnrichedChunk, document: ProcessedDocument) -> dict[str, Any]:
         """
         Format single chunk as Weaviate object.
 
@@ -113,7 +114,7 @@ class WeaviateFormatter(BaseFormatter):
 
         return weaviate_obj
 
-    def format_chunks(self, chunks: List[EnrichedChunk]) -> List[Dict[str, Any]]:
+    def format_chunks(self, chunks: list[EnrichedChunk]) -> list[dict[str, Any]]:
         """
         Format just chunks (creates temporary document).
 

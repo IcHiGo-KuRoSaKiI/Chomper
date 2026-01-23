@@ -6,10 +6,10 @@ Computes additional metadata for chunks:
 - Reading time estimation
 - Complexity scores
 """
-from typing import List
 import re
-from .base import BaseEnricher
+
 from ..models.document import Chunk, EnrichedChunk
+from .base import BaseEnricher
 
 
 class MetadataEnricher(BaseEnricher):
@@ -34,7 +34,7 @@ class MetadataEnricher(BaseEnricher):
         """
         self.reading_speed = reading_speed
 
-    def enrich(self, chunks: List[Chunk]) -> List[EnrichedChunk]:
+    def enrich(self, chunks: list[Chunk]) -> list[EnrichedChunk]:
         """
         Compute metadata for all chunks.
 

@@ -3,9 +3,10 @@ Neo4j formatter for graph database ingestion.
 
 Outputs Neo4j nodes and relationships with proper structure.
 """
-from typing import Dict, Any, List
+from typing import Any
+
+from ..models.document import EnrichedChunk, ProcessedDocument
 from .base import BaseFormatter
-from ..models.document import ProcessedDocument, EnrichedChunk
 
 
 class Neo4jFormatter(BaseFormatter):
@@ -39,7 +40,7 @@ class Neo4jFormatter(BaseFormatter):
         self.unpack_metadata = unpack_metadata
         self.create_section_nodes = create_section_nodes
 
-    def format(self, document: ProcessedDocument) -> Dict[str, Any]:
+    def format(self, document: ProcessedDocument) -> dict[str, Any]:
         """
         Format document as Neo4j nodes and relationships.
 
@@ -58,7 +59,7 @@ class Neo4jFormatter(BaseFormatter):
             "relationships": self._create_relationships(document)
         }
 
-    def _create_document_node(self, document: ProcessedDocument) -> Dict[str, Any]:
+    def _create_document_node(self, document: ProcessedDocument) -> dict[str, Any]:
         """
         Create Document node.
 
@@ -93,7 +94,7 @@ class Neo4jFormatter(BaseFormatter):
 
         return node
 
-    def _create_chunk_nodes(self, document: ProcessedDocument) -> List[Dict[str, Any]]:
+    def _create_chunk_nodes(self, document: ProcessedDocument) -> list[dict[str, Any]]:
         """
         Create Chunk nodes.
 
@@ -147,7 +148,7 @@ class Neo4jFormatter(BaseFormatter):
 
         return chunk_nodes
 
-    def _create_section_nodes(self, document: ProcessedDocument) -> List[Dict[str, Any]]:
+    def _create_section_nodes(self, document: ProcessedDocument) -> list[dict[str, Any]]:
         """
         Create Section nodes from enriched section names.
 
@@ -183,7 +184,7 @@ class Neo4jFormatter(BaseFormatter):
 
         return section_nodes
 
-    def _create_relationships(self, document: ProcessedDocument) -> List[Dict[str, Any]]:
+    def _create_relationships(self, document: ProcessedDocument) -> list[dict[str, Any]]:
         """
         Create relationships between nodes.
 
@@ -245,7 +246,7 @@ class Neo4jFormatter(BaseFormatter):
         slug = re.sub(r'[-\s]+', '_', slug)
         return slug
 
-    def format_chunks(self, chunks: List[EnrichedChunk]) -> Dict[str, Any]:
+    def format_chunks(self, chunks: list[EnrichedChunk]) -> dict[str, Any]:
         """
         Format just chunks (creates temporary document).
 

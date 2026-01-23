@@ -1,35 +1,34 @@
 """
 Configuration constants and extractor/chunker initialization for Chomper.
 """
-from typing import Dict
 
-from src.extractors import (
-    PDFExtractor,
-    DOCXExtractor,
-    PPTXExtractor,
-    CodeExtractor,
-    TextExtractor,
-    MarkdownExtractor,
-    ExcelExtractor,
-    CSVExtractor,
-    HTMLExtractor,
-    JSONExtractor,
-    YAMLExtractor,
-    XMLExtractor,
-    EMLExtractor,
-    MSGExtractor,
-    EPUBExtractor,
-    RTFExtractor,
-)
 from src.chunking.strategies import (
-    PDFChunker,
-    DOCXChunker,
-    PPTXChunker,
     CodeChunker,
-    TextChunker,
-    MarkdownChunker,
+    DOCXChunker,
     ExcelChunker,
     HTMLChunker,
+    MarkdownChunker,
+    PDFChunker,
+    PPTXChunker,
+    TextChunker,
+)
+from src.extractors import (
+    CodeExtractor,
+    CSVExtractor,
+    DOCXExtractor,
+    EMLExtractor,
+    EPUBExtractor,
+    ExcelExtractor,
+    HTMLExtractor,
+    JSONExtractor,
+    MarkdownExtractor,
+    MSGExtractor,
+    PDFExtractor,
+    PPTXExtractor,
+    RTFExtractor,
+    TextExtractor,
+    XMLExtractor,
+    YAMLExtractor,
 )
 
 # Default constants
@@ -43,7 +42,7 @@ OUTPUT_FORMAT_TOON = "toon"
 DEFAULT_OUTPUT_FORMAT = OUTPUT_FORMAT_JSON
 
 # Format descriptions for supported extensions
-FORMAT_DESCRIPTIONS: Dict[str, str] = {
+FORMAT_DESCRIPTIONS: dict[str, str] = {
     ".pdf": "PDF documents with text and image extraction",
     ".docx": "Microsoft Word documents (OOXML format)",
     ".doc": "Microsoft Word documents (legacy format via DOCX handler)",
@@ -83,8 +82,8 @@ FORMAT_DESCRIPTIONS: Dict[str, str] = {
 }
 
 # Extractor mapping by extension
-EXTRACTORS: Dict[str, type] = {}
-CHUNKERS: Dict[str, type] = {}
+EXTRACTORS: dict[str, type] = {}
+CHUNKERS: dict[str, type] = {}
 
 
 def initialize_extractors() -> None:

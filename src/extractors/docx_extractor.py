@@ -5,17 +5,18 @@ Extracts text, headings, images, and tables from DOCX documents.
 """
 import base64
 import io
-from typing import Dict, Any, List, Optional
+from typing import Any
+
 from docx import Document
 from docx.document import Document as _Document
-from docx.oxml.text.paragraph import CT_P
 from docx.oxml.table import CT_Tbl
-from docx.table import _Cell, Table
+from docx.oxml.text.paragraph import CT_P
+from docx.table import Table, _Cell
 from docx.text.paragraph import Paragraph
 from PIL import Image
 
-from .base import BaseExtractor
 from ..models.document import RawDocument
+from .base import BaseExtractor
 
 
 class DOCXExtractor(BaseExtractor):
@@ -83,7 +84,7 @@ class DOCXExtractor(BaseExtractor):
             structure={"sections": sections}
         )
 
-    def _extract_sections(self, doc: Document) -> List[Dict[str, Any]]:
+    def _extract_sections(self, doc: Document) -> list[dict[str, Any]]:
         """
         Extract document sections based on heading hierarchy.
 
@@ -160,7 +161,7 @@ class DOCXExtractor(BaseExtractor):
 
         return sections
 
-    def _get_heading_level(self, paragraph: Paragraph) -> Optional[int]:
+    def _get_heading_level(self, paragraph: Paragraph) -> int | None:
         """
         Get the heading level of a paragraph.
 
@@ -181,7 +182,7 @@ class DOCXExtractor(BaseExtractor):
         self,
         paragraph: Paragraph,
         doc: Document
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Extract images from a paragraph.
 
@@ -326,7 +327,7 @@ class DOCXExtractor(BaseExtractor):
             elif isinstance(child, CT_Tbl):
                 yield Table(child, parent)
 
-    def _combine_section_content(self, section: Dict[str, Any]) -> str:
+    def _combine_section_content(self, section: dict[str, Any]) -> str:
         """
         Combine section content into text.
 
@@ -357,7 +358,7 @@ class DOCXExtractor(BaseExtractor):
 
         return "\n\n".join(text_parts)
 
-    def _extract_docx_metadata(self, doc: Document) -> Dict[str, Any]:
+    def _extract_docx_metadata(self, doc: Document) -> dict[str, Any]:
         """
         Extract DOCX metadata.
 

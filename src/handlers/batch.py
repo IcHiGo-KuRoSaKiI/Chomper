@@ -3,21 +3,21 @@ Batch parsing handler for Chomper.
 """
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 from mcp.types import TextContent
 
 from src.server.helpers import (
-    validate_file_path,
+    extract_images_from_structure,
     get_extractor_for_file,
     remove_image_placeholders,
-    extract_images_from_structure,
+    validate_file_path,
 )
 
 logger = logging.getLogger("chomper")
 
 
-async def handle_batch_parse(arguments: Dict[str, Any]) -> List[TextContent]:
+async def handle_batch_parse(arguments: dict[str, Any]) -> list[TextContent]:
     """
     Handle batch_parse tool call.
 
@@ -57,7 +57,7 @@ async def handle_batch_parse(arguments: Dict[str, Any]) -> List[TextContent]:
             clean_text = remove_image_placeholders(raw_doc.text)
 
             # Build summary result
-            doc_result: Dict[str, Any] = {
+            doc_result: dict[str, Any] = {
                 "success": True,
                 "file_path": str(file_path),
                 "text_preview": clean_text[:500] + "..." if len(clean_text) > 500 else clean_text,

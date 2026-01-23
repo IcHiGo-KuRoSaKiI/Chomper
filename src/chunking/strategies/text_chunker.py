@@ -6,9 +6,9 @@ Chunks plain text while preserving:
 - Sentence boundaries
 - Semantic coherence (via TextTiling algorithm)
 """
-from typing import List
+
+from ...models.document import Chunk, RawDocument
 from ..base import BaseChunker
-from ...models.document import RawDocument, Chunk
 
 
 class TextChunker(BaseChunker):
@@ -41,7 +41,7 @@ class TextChunker(BaseChunker):
         super().__init__(target_size, overlap, preserve_context)
         self.use_semantic = use_semantic
 
-    def chunk(self, raw_doc: RawDocument) -> List[Chunk]:
+    def chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """
         Chunk text document.
 
@@ -58,7 +58,7 @@ class TextChunker(BaseChunker):
             # Simple paragraph-based chunking
             return self._paragraph_chunk(raw_doc)
 
-    def _paragraph_chunk(self, raw_doc: RawDocument) -> List[Chunk]:
+    def _paragraph_chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """
         Chunk by paragraphs.
 
@@ -143,7 +143,7 @@ class TextChunker(BaseChunker):
 
         return chunks
 
-    def _semantic_chunk(self, raw_doc: RawDocument) -> List[Chunk]:
+    def _semantic_chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """
         Semantic chunking using TextTiling algorithm.
 
@@ -199,7 +199,7 @@ class TextChunker(BaseChunker):
 
         return chunks
 
-    def _calculate_similarities(self, paragraphs: List[dict]) -> List[float]:
+    def _calculate_similarities(self, paragraphs: list[dict]) -> list[float]:
         """
         Calculate lexical similarity between adjacent paragraphs.
 
@@ -224,7 +224,7 @@ class TextChunker(BaseChunker):
 
         return similarities
 
-    def _find_boundaries(self, similarities: List[float]) -> List[int]:
+    def _find_boundaries(self, similarities: list[float]) -> list[int]:
         """
         Find topic boundaries (valleys in similarity scores).
 

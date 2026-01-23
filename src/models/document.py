@@ -7,7 +7,7 @@ These models represent documents at different stages:
 - EnrichedChunk: After enrichment
 """
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
+from typing import Any
 
 
 @dataclass
@@ -19,8 +19,8 @@ class RawDocument:
     before chunking and enrichment.
     """
     text: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    structure: Optional[Dict[str, Any]] = None  # Pages, sections, etc.
+    metadata: dict[str, Any] = field(default_factory=dict)
+    structure: dict[str, Any] | None = None  # Pages, sections, etc.
 
     def __post_init__(self):
         """Validate raw document."""
@@ -39,7 +39,7 @@ class Chunk:
     text: str
     start_char: int = 0
     end_char: int = 0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         """Validate and compute defaults."""
@@ -69,10 +69,10 @@ class EnrichedChunk(Chunk):
     Extends Chunk with computed metadata like keywords,
     section names, and other analysis results.
     """
-    keywords: List[str] = field(default_factory=list)
-    section_name: Optional[str] = None
+    keywords: list[str] = field(default_factory=list)
+    section_name: str | None = None
     section_type: str = "text"  # "text", "code", "image", "table"
-    computed_metadata: Dict[str, Any] = field(default_factory=dict)
+    computed_metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def has_keywords(self) -> bool:
@@ -95,8 +95,8 @@ class ProcessedDocument:
     document_id: str
     source: str
     doc_type: str
-    chunks: List[EnrichedChunk]
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    chunks: list[EnrichedChunk]
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def total_chunks(self) -> int:
@@ -108,7 +108,7 @@ class ProcessedDocument:
         """Total word count across all chunks."""
         return sum(chunk.word_count for chunk in self.chunks)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
             "document_id": self.document_id,

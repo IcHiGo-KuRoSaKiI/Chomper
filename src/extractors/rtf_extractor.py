@@ -5,9 +5,10 @@ RTF is a document file format developed by Microsoft for
 cross-platform document interchange.
 """
 from pathlib import Path
-from typing import Any, Dict
-from .base import BaseExtractor
+from typing import Any
+
 from ..models.document import RawDocument
+from .base import BaseExtractor
 
 # Optional import
 try:
@@ -98,7 +99,7 @@ class RTFExtractor(BaseExtractor):
 
         return '\n'.join(cleaned_lines).strip()
 
-    def _analyze_structure(self, text: str) -> Dict[str, Any]:
+    def _analyze_structure(self, text: str) -> dict[str, Any]:
         """Analyze text structure."""
         lines = text.split('\n')
         paragraphs = [p for p in text.split('\n\n') if p.strip()]

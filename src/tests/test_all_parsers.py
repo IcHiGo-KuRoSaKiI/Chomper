@@ -6,7 +6,6 @@ Tests all extractors, chunkers, enrichers, and formatters.
 import os
 import sys
 import tempfile
-import json
 from pathlib import Path
 
 # Add parent directory to path
@@ -14,19 +13,24 @@ parent_dir = Path(__file__).parent.parent.absolute()
 sys.path.insert(0, str(parent_dir.parent))  # Add parsers parent dir
 
 # Now import as package
-from src.models.document import RawDocument, Chunk, EnrichedChunk, ProcessedDocument
-from src.extractors import (
-    PDFExtractor, DOCXExtractor, PPTXExtractor,
-    CodeExtractor, TextExtractor, MarkdownExtractor,
-    ExcelExtractor, CSVExtractor, HTMLExtractor
-)
 from src.chunking.strategies import (
-    PDFChunker, DOCXChunker, PPTXChunker,
-    CodeChunker, TextChunker, MarkdownChunker,
-    ExcelChunker, HTMLChunker
+    CodeChunker,
+    ExcelChunker,
+    HTMLChunker,
+    MarkdownChunker,
+    TextChunker,
 )
-from src.enrichment import KeywordExtractor, SectionDetector, TitleGenerator, MetadataEnricher
-from src.formatters import SimpleFormatter, WeaviateFormatter, Neo4jFormatter
+from src.enrichment import KeywordExtractor, MetadataEnricher, SectionDetector, TitleGenerator
+from src.extractors import (
+    CodeExtractor,
+    CSVExtractor,
+    ExcelExtractor,
+    HTMLExtractor,
+    MarkdownExtractor,
+    TextExtractor,
+)
+from src.formatters import Neo4jFormatter, SimpleFormatter, WeaviateFormatter
+from src.models.document import Chunk, EnrichedChunk, ProcessedDocument, RawDocument
 from src.pipeline import DocumentPipeline
 
 
@@ -51,7 +55,7 @@ class TestResults:
         print("\n" + "=" * 70)
         print(f"TEST SUMMARY: {self.passed}/{total} passed")
         if self.failed > 0:
-            print(f"\nFailed tests:")
+            print("\nFailed tests:")
             for name, error in self.errors:
                 print(f"  - {name}: {error}")
         print("=" * 70)

@@ -5,10 +5,10 @@ Generates smart section titles from content using:
 - Keywords method (from extracted keywords)
 - First sentence method (using first sentence as title)
 """
-from typing import List
 import re
-from .base import BaseEnricher
+
 from ..models.document import Chunk, EnrichedChunk
+from .base import BaseEnricher
 
 
 class TitleGenerator(BaseEnricher):
@@ -37,7 +37,7 @@ class TitleGenerator(BaseEnricher):
         if self.method not in ["keywords", "first_sentence"]:
             raise ValueError(f"Unknown method: {method}. Use 'keywords' or 'first_sentence'")
 
-    def enrich(self, chunks: List[Chunk]) -> List[EnrichedChunk]:
+    def enrich(self, chunks: list[Chunk]) -> list[EnrichedChunk]:
         """
         Generate smart titles for chunks/sections.
 

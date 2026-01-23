@@ -5,12 +5,13 @@ Extracts text, images, and slide structure from PowerPoint presentations.
 """
 import base64
 import io
-from typing import Dict, Any, List
-from pptx import Presentation
-from PIL import Image
+from typing import Any
 
-from .base import BaseExtractor
+from PIL import Image
+from pptx import Presentation
+
 from ..models.document import RawDocument
+from .base import BaseExtractor
 
 
 class PPTXExtractor(BaseExtractor):
@@ -82,7 +83,7 @@ class PPTXExtractor(BaseExtractor):
             structure={"slides": slides}
         )
 
-    def _extract_slides(self, prs: Presentation) -> List[Dict[str, Any]]:
+    def _extract_slides(self, prs: Presentation) -> list[dict[str, Any]]:
         """
         Extract all slides from presentation.
 
@@ -174,7 +175,7 @@ class PPTXExtractor(BaseExtractor):
             table_data.append(" | ".join(row_data))
         return "\n".join(table_data)
 
-    def _combine_slide_content(self, slide: Dict[str, Any]) -> str:
+    def _combine_slide_content(self, slide: dict[str, Any]) -> str:
         """
         Combine slide content into text.
 
@@ -204,7 +205,7 @@ class PPTXExtractor(BaseExtractor):
 
         return "\n\n".join(text_parts)
 
-    def _extract_pptx_metadata(self, prs: Presentation) -> Dict[str, Any]:
+    def _extract_pptx_metadata(self, prs: Presentation) -> dict[str, Any]:
         """
         Extract PPTX metadata.
 

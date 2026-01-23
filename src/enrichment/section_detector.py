@@ -5,10 +5,10 @@ Detects topic boundaries and section transitions using:
 - Heuristic detection (pattern matching)
 - TextTiling algorithm (topic shift detection)
 """
-from typing import List, Tuple
 import re
-from .base import BaseEnricher
+
 from ..models.document import Chunk, EnrichedChunk
+from .base import BaseEnricher
 
 
 class SectionDetector(BaseEnricher):
@@ -32,7 +32,7 @@ class SectionDetector(BaseEnricher):
         if self.method not in ["heuristic", "texttiling"]:
             raise ValueError(f"Unknown method: {method}. Use 'heuristic' or 'texttiling'")
 
-    def enrich(self, chunks: List[Chunk]) -> List[EnrichedChunk]:
+    def enrich(self, chunks: list[Chunk]) -> list[EnrichedChunk]:
         """
         Detect sections and assign section names.
 
@@ -49,7 +49,7 @@ class SectionDetector(BaseEnricher):
         else:  # texttiling
             return self._texttiling_detection(enriched_chunks)
 
-    def _heuristic_detection(self, chunks: List[EnrichedChunk]) -> List[EnrichedChunk]:
+    def _heuristic_detection(self, chunks: list[EnrichedChunk]) -> list[EnrichedChunk]:
         """
         Detect sections using pattern matching.
 
@@ -129,7 +129,7 @@ class SectionDetector(BaseEnricher):
 
         return None
 
-    def _texttiling_detection(self, chunks: List[EnrichedChunk]) -> List[EnrichedChunk]:
+    def _texttiling_detection(self, chunks: list[EnrichedChunk]) -> list[EnrichedChunk]:
         """
         Detect sections using TextTiling algorithm.
 
@@ -165,7 +165,7 @@ class SectionDetector(BaseEnricher):
         boundaries.append(len(chunks))  # End is always a boundary
 
         # Assign section names
-        for section_num, (start, end) in enumerate(zip(boundaries[:-1], boundaries[1:]), 1):
+        for section_num, (start, end) in enumerate(zip(boundaries[:-1], boundaries[1:], strict=False), 1):
             for i in range(start, end):
                 chunks[i].section_name = f"Section {section_num}"
 

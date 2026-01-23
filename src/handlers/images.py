@@ -3,22 +3,22 @@ Image document handler for Chomper.
 """
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
-from mcp.types import TextContent, ImageContent
+from mcp.types import ImageContent, TextContent
 
 from src.server.config import DEFAULT_MAX_IMAGES
 from src.server.helpers import (
-    validate_file_path,
-    get_extractor_for_file,
-    extract_images_from_structure,
     detect_mime_type,
+    extract_images_from_structure,
+    get_extractor_for_file,
+    validate_file_path,
 )
 
 logger = logging.getLogger("chomper")
 
 
-async def handle_get_document_images(arguments: Dict[str, Any]) -> List[TextContent | ImageContent]:
+async def handle_get_document_images(arguments: dict[str, Any]) -> list[TextContent | ImageContent]:
     """
     Handle get_document_images tool call for on-demand image retrieval.
 
@@ -66,7 +66,7 @@ async def handle_get_document_images(arguments: Dict[str, Any]) -> List[TextCont
     )
 
     # Build response
-    response_items: List[TextContent | ImageContent] = []
+    response_items: list[TextContent | ImageContent] = []
 
     # Summary metadata
     summary = {

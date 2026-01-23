@@ -7,9 +7,9 @@ Chunks PPTX documents by slides, preserving:
 - Speaker notes
 - Images and tables in context
 """
-from typing import List
+
+from ...models.document import Chunk, RawDocument
 from ..base import BaseChunker
-from ...models.document import RawDocument, Chunk
 
 
 class PPTXChunker(BaseChunker):
@@ -39,7 +39,7 @@ class PPTXChunker(BaseChunker):
         """
         super().__init__(target_size, overlap, preserve_context)
 
-    def chunk(self, raw_doc: RawDocument) -> List[Chunk]:
+    def chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """
         Chunk PPTX document by slides.
 
@@ -118,7 +118,7 @@ class PPTXChunker(BaseChunker):
             }
         )
 
-    def _simple_chunk(self, raw_doc: RawDocument) -> List[Chunk]:
+    def _simple_chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """
         Fallback to simple chunking if no structure available.
 

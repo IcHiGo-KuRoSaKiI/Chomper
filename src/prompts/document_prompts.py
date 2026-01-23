@@ -4,11 +4,10 @@ MCP Prompt definitions for document analysis.
 These prompts provide reusable templates for common document analysis tasks.
 Users can select these prompts to get pre-configured analysis workflows.
 """
-from typing import Dict, List, Any
-
+from typing import Any
 
 # Prompt definitions
-PROMPTS: Dict[str, Dict[str, Any]] = {
+PROMPTS: dict[str, dict[str, Any]] = {
     "summarize-document": {
         "name": "summarize-document",
         "description": "Generate a comprehensive summary of the document",
@@ -172,12 +171,12 @@ What would you like to know about this document?"""
 }
 
 
-def get_prompt_template(name: str) -> Dict[str, Any]:
+def get_prompt_template(name: str) -> dict[str, Any]:
     """Get a prompt definition by name."""
     return PROMPTS.get(name)
 
 
-def list_prompts() -> List[Dict[str, Any]]:
+def list_prompts() -> list[dict[str, Any]]:
     """Get list of all available prompts."""
     return [
         {

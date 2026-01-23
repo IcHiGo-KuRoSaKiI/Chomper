@@ -5,25 +5,20 @@ Extracts text, tables, formulas, and metadata from Excel files (.xlsx, .xls).
 Handles merged cells, multiple sheets, and table detection.
 """
 import logging
-from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
+from typing import Any
 
 try:
     import openpyxl
-    from openpyxl.utils import get_column_letter
     from openpyxl.cell.cell import Cell
+    from openpyxl.utils import get_column_letter
     OPENPYXL_AVAILABLE = True
 except ImportError:
     OPENPYXL_AVAILABLE = False
 
-from .base import BaseExtractor
 from ..models.document import RawDocument
-from ..models.excel_models import (
-    CellInfo,
-    TableRange,
-    SheetInfo,
-    ExcelMetadata
-)
+from ..models.excel_models import ExcelMetadata, SheetInfo, TableRange
+from .base import BaseExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -215,7 +210,7 @@ class ExcelExtractor(BaseExtractor):
 
         return False
 
-    def _detect_tables_in_sheet(self, sheet) -> List[TableRange]:
+    def _detect_tables_in_sheet(self, sheet) -> list[TableRange]:
         """
         Detect table boundaries in sheet.
 
@@ -299,7 +294,7 @@ class ExcelExtractor(BaseExtractor):
 
         return tables
 
-    def _get_table_column_range(self, sheet, start_row: int, end_row: int) -> Tuple[int, int]:
+    def _get_table_column_range(self, sheet, start_row: int, end_row: int) -> tuple[int, int]:
         """
         Determine the column range for a table.
 
@@ -371,7 +366,7 @@ class ExcelExtractor(BaseExtractor):
 
         return False
 
-    def _infer_column_types(self, sheet, max_column: int) -> Dict[int, str]:
+    def _infer_column_types(self, sheet, max_column: int) -> dict[int, str]:
         """
         Infer data types for each column.
 
@@ -502,7 +497,7 @@ class ExcelExtractor(BaseExtractor):
 
         return "\n".join(rows_text)
 
-    def _combine_sheets_text(self, sheets_data: List[Dict[str, Any]]) -> str:
+    def _combine_sheets_text(self, sheets_data: list[dict[str, Any]]) -> str:
         """
         Combine multiple sheets into single text.
 
@@ -525,7 +520,7 @@ class ExcelExtractor(BaseExtractor):
 
         return "\n".join(combined_parts)
 
-    def _extract_workbook_metadata(self, workbook, excel_metadata: ExcelMetadata) -> Dict[str, Any]:
+    def _extract_workbook_metadata(self, workbook, excel_metadata: ExcelMetadata) -> dict[str, Any]:
         """
         Extract workbook-level metadata.
 

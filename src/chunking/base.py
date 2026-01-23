@@ -4,8 +4,8 @@ Base class for document chunkers.
 All format-specific chunkers inherit from BaseChunker.
 """
 from abc import ABC, abstractmethod
-from typing import List
-from ..models.document import RawDocument, Chunk
+
+from ..models.document import Chunk, RawDocument
 
 
 class BaseChunker(ABC):
@@ -35,7 +35,7 @@ class BaseChunker(ABC):
         self.preserve_context = preserve_context
 
     @abstractmethod
-    def chunk(self, raw_doc: RawDocument) -> List[Chunk]:
+    def chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """
         Split document into chunks.
 
@@ -84,7 +84,7 @@ class BaseChunker(ABC):
         text: str,
         target_size: int = None,
         overlap: int = None
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Simple word-count-based splitting with overlap.
 
@@ -113,7 +113,7 @@ class BaseChunker(ABC):
 
         return chunks
 
-    def _split_by_paragraphs(self, text: str) -> List[str]:
+    def _split_by_paragraphs(self, text: str) -> list[str]:
         """
         Split text by paragraph boundaries (double newlines).
 
@@ -126,7 +126,7 @@ class BaseChunker(ABC):
         paragraphs = text.split("\n\n")
         return [p.strip() for p in paragraphs if p.strip()]
 
-    def _split_by_sentences(self, text: str) -> List[str]:
+    def _split_by_sentences(self, text: str) -> list[str]:
         """
         Simple sentence splitting (can be improved with nltk).
 

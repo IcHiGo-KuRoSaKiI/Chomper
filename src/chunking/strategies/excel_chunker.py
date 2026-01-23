@@ -8,9 +8,9 @@ Provides multiple chunking strategies:
 - auto: Automatically select best strategy
 """
 import logging
-from typing import List, Optional
-from ...models.document import RawDocument, Chunk
-from ...models.excel_models import SheetInfo, TableRange, ExcelMetadata
+
+from ...models.document import Chunk, RawDocument
+from ...models.excel_models import ExcelMetadata, SheetInfo, TableRange
 from ..base import BaseChunker
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,7 @@ class ExcelChunker(BaseChunker):
         if strategy not in ["auto", "by_sheet", "by_table", "by_rows"]:
             raise ValueError(f"Unknown strategy: {strategy}")
 
-    def chunk(self, raw_doc: RawDocument) -> List[Chunk]:
+    def chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """
         Chunk Excel/CSV document.
 
@@ -83,7 +83,7 @@ class ExcelChunker(BaseChunker):
         # Excel files may have multiple sheets
         return self._chunk_excel(raw_doc, structure)
 
-    def _chunk_csv(self, raw_doc: RawDocument, structure: dict) -> List[Chunk]:
+    def _chunk_csv(self, raw_doc: RawDocument, structure: dict) -> list[Chunk]:
         """
         Chunk CSV file.
 
@@ -118,7 +118,7 @@ class ExcelChunker(BaseChunker):
         # For large CSV, chunk by rows
         return self._chunk_by_rows_csv(raw_doc, csv_metadata)
 
-    def _chunk_excel(self, raw_doc: RawDocument, structure: dict) -> List[Chunk]:
+    def _chunk_excel(self, raw_doc: RawDocument, structure: dict) -> list[Chunk]:
         """
         Chunk Excel file using selected or auto-detected strategy.
 
@@ -160,7 +160,7 @@ class ExcelChunker(BaseChunker):
             # Fallback to by_sheet
             return self._chunk_by_sheet(excel_metadata, sheets_data)
 
-    def _auto_select_strategy(self, excel_metadata: ExcelMetadata, sheets_data: List[dict]) -> str:
+    def _auto_select_strategy(self, excel_metadata: ExcelMetadata, sheets_data: list[dict]) -> str:
         """
         Automatically select best chunking strategy.
 
@@ -203,7 +203,7 @@ class ExcelChunker(BaseChunker):
         # Default: by_sheet
         return "by_sheet"
 
-    def _chunk_by_sheet(self, excel_metadata: ExcelMetadata, sheets_data: List[dict]) -> List[Chunk]:
+    def _chunk_by_sheet(self, excel_metadata: ExcelMetadata, sheets_data: list[dict]) -> list[Chunk]:
         """
         Create one chunk per sheet.
 
@@ -246,7 +246,7 @@ class ExcelChunker(BaseChunker):
 
         return chunks
 
-    def _chunk_by_table(self, excel_metadata: ExcelMetadata, sheets_data: List[dict]) -> List[Chunk]:
+    def _chunk_by_table(self, excel_metadata: ExcelMetadata, sheets_data: list[dict]) -> list[Chunk]:
         """
         Create one chunk per detected table.
 
@@ -310,7 +310,7 @@ class ExcelChunker(BaseChunker):
 
         return chunks
 
-    def _chunk_by_rows(self, excel_metadata: ExcelMetadata, sheets_data: List[dict]) -> List[Chunk]:
+    def _chunk_by_rows(self, excel_metadata: ExcelMetadata, sheets_data: list[dict]) -> list[Chunk]:
         """
         Create chunks of fixed row ranges.
 
@@ -368,7 +368,7 @@ class ExcelChunker(BaseChunker):
 
         return chunks
 
-    def _chunk_by_rows_csv(self, raw_doc: RawDocument, csv_metadata) -> List[Chunk]:
+    def _chunk_by_rows_csv(self, raw_doc: RawDocument, csv_metadata) -> list[Chunk]:
         """
         Chunk CSV by row ranges.
 
@@ -440,7 +440,7 @@ class ExcelChunker(BaseChunker):
 
         return '\n'.join(filtered_rows)
 
-    def _convert_to_html_table(self, text: str, sheet_info: Optional[SheetInfo]) -> str:
+    def _convert_to_html_table(self, text: str, sheet_info: SheetInfo | None) -> str:
         """
         Convert TSV text to HTML table format.
 

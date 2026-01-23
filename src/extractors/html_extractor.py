@@ -5,14 +5,12 @@ Extracts text, tables, lists, forms, links, and metadata from HTML files and web
 Handles boilerplate removal, article extraction, and semantic structure detection.
 """
 import logging
-import re
-from typing import Dict, Any, List, Optional, Tuple
-from pathlib import Path
 from datetime import datetime
-from urllib.parse import urlparse, urljoin
+from typing import Any
+from urllib.parse import urlparse
 
 try:
-    from bs4 import BeautifulSoup, Tag, NavigableString
+    from bs4 import BeautifulSoup, NavigableString, Tag
     BS4_AVAILABLE = True
 except ImportError:
     BS4_AVAILABLE = False
@@ -23,17 +21,17 @@ try:
 except ImportError:
     TRAFILATURA_AVAILABLE = False
 
-from .base import BaseExtractor
 from ..models.document import RawDocument
 from ..models.html_models import (
-    HTMLTable,
-    HTMLList,
+    HTMLDocument,
     HTMLForm,
     HTMLLink,
-    HTMLSection,
+    HTMLList,
     HTMLMetadata,
-    HTMLDocument
+    HTMLSection,
+    HTMLTable,
 )
+from .base import BaseExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +62,7 @@ class HTMLExtractor(BaseExtractor):
         extract_links: bool = True,
         extract_metadata: bool = True,
         preserve_structure: bool = True,
-        base_url: Optional[str] = None
+        base_url: str | None = None
     ):
         """
         Initialize HTML extractor.
@@ -107,7 +105,7 @@ class HTMLExtractor(BaseExtractor):
         self.validate_file(file_path)
 
         # Read HTML content
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(file_path, encoding='utf-8', errors='ignore') as f:
             html_content = f.read()
 
         # Parse with BeautifulSoup
@@ -308,7 +306,7 @@ class HTMLExtractor(BaseExtractor):
         """
         return soup.get_text(separator='\n', strip=True)
 
-    def _extract_tables(self, soup: BeautifulSoup) -> List[HTMLTable]:
+    def _extract_tables(self, soup: BeautifulSoup) -> list[HTMLTable]:
         """
         Extract all tables from HTML.
 
@@ -364,7 +362,7 @@ class HTMLExtractor(BaseExtractor):
 
         return tables
 
-    def _extract_lists(self, soup: BeautifulSoup) -> List[HTMLList]:
+    def _extract_lists(self, soup: BeautifulSoup) -> list[HTMLList]:
         """
         Extract all lists from HTML.
 
@@ -394,7 +392,7 @@ class HTMLExtractor(BaseExtractor):
 
         return lists
 
-    def _extract_forms(self, soup: BeautifulSoup) -> List[HTMLForm]:
+    def _extract_forms(self, soup: BeautifulSoup) -> list[HTMLForm]:
         """
         Extract all forms from HTML.
 
@@ -433,7 +431,7 @@ class HTMLExtractor(BaseExtractor):
 
         return forms
 
-    def _extract_links(self, soup: BeautifulSoup) -> List[HTMLLink]:
+    def _extract_links(self, soup: BeautifulSoup) -> list[HTMLLink]:
         """
         Extract and classify all hyperlinks.
 
@@ -468,7 +466,7 @@ class HTMLExtractor(BaseExtractor):
 
         return links
 
-    def _extract_sections(self, soup: BeautifulSoup) -> List[HTMLSection]:
+    def _extract_sections(self, soup: BeautifulSoup) -> list[HTMLSection]:
         """
         Extract semantic sections from HTML.
 
@@ -511,7 +509,7 @@ class HTMLExtractor(BaseExtractor):
 
         return sections
 
-    def _convert_html_metadata_to_dict(self, html_doc: HTMLDocument) -> Dict[str, Any]:
+    def _convert_html_metadata_to_dict(self, html_doc: HTMLDocument) -> dict[str, Any]:
         """
         Convert HTMLDocument to metadata dictionary.
 

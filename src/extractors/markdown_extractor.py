@@ -4,9 +4,10 @@ Markdown extractor with header-aware structure.
 Extracts content from Markdown files preserving heading hierarchy.
 """
 import re
-from typing import Dict, Any, List, Optional
-from .base import BaseExtractor
+from typing import Any
+
 from ..models.document import RawDocument
+from .base import BaseExtractor
 
 
 class MarkdownExtractor(BaseExtractor):
@@ -39,7 +40,7 @@ class MarkdownExtractor(BaseExtractor):
         self.validate_file(file_path)
 
         # Read file content
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(file_path, encoding='utf-8', errors='ignore') as f:
             content = f.read()
 
         # Extract structure
@@ -58,7 +59,7 @@ class MarkdownExtractor(BaseExtractor):
             structure=structure
         )
 
-    def _extract_sections(self, content: str) -> Dict[str, Any]:
+    def _extract_sections(self, content: str) -> dict[str, Any]:
         """
         Extract sections based on heading hierarchy.
 
@@ -135,7 +136,7 @@ class MarkdownExtractor(BaseExtractor):
 
         return {"sections": sections}
 
-    def _classify_line(self, line: str) -> Dict[str, Any]:
+    def _classify_line(self, line: str) -> dict[str, Any]:
         """
         Classify a line of content.
 

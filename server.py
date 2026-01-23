@@ -29,39 +29,40 @@ Usage:
 import asyncio
 import logging
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Dict, List, Sequence
+from typing import Any
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import (
-    TextContent,
+    GetPromptResult,
     ImageContent,
-    Tool,
     Prompt,
     PromptArgument,
     PromptMessage,
-    GetPromptResult,
+    TextContent,
+    Tool,
 )
 
 # Add src to path if needed
 sys.path.insert(0, str(Path(__file__).parent))
 
 # Import from new modular structure
-from src.server.config import EXTRACTORS
-from src.server.tools import get_tools
-from src.server.helpers import validate_file_path, get_extractor_for_file, format_error_response
-from src.prompts import PROMPTS, format_prompt
 from src.handlers import (
+    handle_batch_parse,
+    handle_extract_metadata,
+    handle_get_document_chunk,
+    handle_get_document_images,
+    handle_list_supported_formats,
     handle_parse_document,
     handle_parse_document_bytes,
-    handle_get_document_chunk,
     handle_parse_document_chunked,
-    handle_get_document_images,
-    handle_extract_metadata,
-    handle_list_supported_formats,
-    handle_batch_parse,
 )
+from src.prompts import PROMPTS, format_prompt
+from src.server.config import EXTRACTORS
+from src.server.helpers import format_error_response, get_extractor_for_file, validate_file_path
+from src.server.tools import get_tools
 
 # Configure logging
 logging.basicConfig(
@@ -75,16 +76,16 @@ server = Server("chomper")
 
 
 @server.list_tools()
-async def list_tools() -> List[Tool]:
+async def list_tools() -> list[Tool]:
     """List available document parsing tools."""
     return get_tools()
 
 
 @server.list_prompts()
-async def list_prompts() -> List[Prompt]:
+async def list_prompts() -> list[Prompt]:
     """List available document analysis prompts."""
     prompts = []
-    for name, prompt_def in PROMPTS.items():
+    for _name, prompt_def in PROMPTS.items():
         arguments = [
             PromptArgument(
                 name=arg["name"],
@@ -104,7 +105,7 @@ async def list_prompts() -> List[Prompt]:
 
 
 @server.get_prompt()
-async def get_prompt(name: str, arguments: Dict[str, str] | None = None) -> GetPromptResult:
+async def get_prompt(name: str, arguments: dict[str, str] | None = None) -> GetPromptResult:
     """Get a specific prompt with document content filled in."""
     if name not in PROMPTS:
         raise ValueError(f"Unknown prompt: {name}. Available: {list(PROMPTS.keys())}")
@@ -153,7 +154,7 @@ async def get_prompt(name: str, arguments: Dict[str, str] | None = None) -> GetP
 
 
 @server.call_tool()
-async def call_tool(name: str, arguments: Dict[str, Any]) -> Sequence[TextContent | ImageContent]:
+async def call_tool(name: str, arguments: dict[str, Any]) -> Sequence[TextContent | ImageContent]:
     """Handle tool calls for document parsing."""
     try:
         if name == "parse_document":

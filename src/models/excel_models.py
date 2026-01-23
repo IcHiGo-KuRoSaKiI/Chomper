@@ -7,7 +7,7 @@ These models represent Excel/CSV-specific structures:
 - CellInfo: Individual cell information
 """
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Any
 
 
 @dataclass
@@ -21,10 +21,10 @@ class CellInfo:
     column: int
     value: Any
     data_type: str  # "text", "number", "date", "formula", "boolean", "empty"
-    formula: Optional[str] = None
+    formula: str | None = None
     is_merged: bool = False
-    merge_range: Optional[Tuple[int, int, int, int]] = None  # (min_row, min_col, max_row, max_col)
-    style_info: Dict[str, Any] = field(default_factory=dict)
+    merge_range: tuple[int, int, int, int] | None = None  # (min_row, min_col, max_row, max_col)
+    style_info: dict[str, Any] = field(default_factory=dict)
 
     @property
     def coordinate(self) -> str:
@@ -54,9 +54,9 @@ class TableRange:
     start_col: int
     end_row: int
     end_col: int
-    header_row: Optional[int] = None
+    header_row: int | None = None
     has_headers: bool = True
-    table_name: Optional[str] = None
+    table_name: str | None = None
 
     @property
     def num_rows(self) -> int:
@@ -101,11 +101,11 @@ class SheetInfo:
     max_row: int
     max_column: int
     has_data: bool
-    tables: List[TableRange] = field(default_factory=list)
-    merged_cells: List[Tuple[int, int, int, int]] = field(default_factory=list)
+    tables: list[TableRange] = field(default_factory=list)
+    merged_cells: list[tuple[int, int, int, int]] = field(default_factory=list)
     has_formulas: bool = False
     has_merged_cells: bool = False
-    column_types: Dict[int, str] = field(default_factory=dict)  # col_idx -> data_type
+    column_types: dict[int, str] = field(default_factory=dict)  # col_idx -> data_type
 
     @property
     def total_cells(self) -> int:
@@ -122,7 +122,7 @@ class SheetInfo:
         """Check if sheet is effectively empty."""
         return not self.has_data or (self.max_row == 0 and self.max_column == 0)
 
-    def get_table_at_cell(self, row: int, col: int) -> Optional[TableRange]:
+    def get_table_at_cell(self, row: int, col: int) -> TableRange | None:
         """Find table containing given cell."""
         for table in self.tables:
             if table.contains_cell(row, col):
@@ -139,13 +139,13 @@ class ExcelMetadata:
     """
     filename: str
     total_sheets: int
-    sheets: List[SheetInfo] = field(default_factory=list)
-    author: Optional[str] = None
-    created: Optional[str] = None
-    modified: Optional[str] = None
+    sheets: list[SheetInfo] = field(default_factory=list)
+    author: str | None = None
+    created: str | None = None
+    modified: str | None = None
 
     @property
-    def active_sheets(self) -> List[SheetInfo]:
+    def active_sheets(self) -> list[SheetInfo]:
         """Get sheets that contain data."""
         return [sheet for sheet in self.sheets if not sheet.is_empty]
 
@@ -173,8 +173,8 @@ class CSVMetadata:
     has_header: bool = True
     num_rows: int = 0
     num_columns: int = 0
-    column_names: List[str] = field(default_factory=list)
-    column_types: Dict[str, str] = field(default_factory=dict)
+    column_names: list[str] = field(default_factory=list)
+    column_types: dict[str, str] = field(default_factory=dict)
 
     @property
     def is_tsv(self) -> bool:

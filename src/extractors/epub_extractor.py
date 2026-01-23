@@ -4,10 +4,10 @@ Extractor for EPUB e-book format.
 EPUB files are essentially ZIP archives containing XHTML content,
 CSS styles, images, and metadata in a structured format.
 """
-from pathlib import Path
-from typing import Any, Dict, List, Optional
-from .base import BaseExtractor
+from typing import Any
+
 from ..models.document import RawDocument
+from .base import BaseExtractor
 
 # Optional import
 try:
@@ -123,7 +123,7 @@ class EPUBExtractor(BaseExtractor):
             }
         )
 
-    def _extract_metadata(self, book) -> Dict[str, Any]:
+    def _extract_metadata(self, book) -> dict[str, Any]:
         """Extract EPUB metadata."""
         metadata = {}
 
@@ -144,7 +144,7 @@ class EPUBExtractor(BaseExtractor):
 
         return metadata
 
-    def _extract_toc(self, book) -> List[Dict[str, Any]]:
+    def _extract_toc(self, book) -> list[dict[str, Any]]:
         """Extract table of contents."""
         toc_items = []
 
@@ -172,7 +172,7 @@ class EPUBExtractor(BaseExtractor):
 
         return toc_items
 
-    def _extract_chapters(self, book) -> List[Dict[str, Any]]:
+    def _extract_chapters(self, book) -> list[dict[str, Any]]:
         """Extract chapter content."""
         chapters = []
 
