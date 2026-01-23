@@ -28,19 +28,19 @@ class OutputFormatter(ABC):
     """Base class for output formatters."""
 
     @abstractmethod
-    def format_parse_result(self, result: "ParseResult") -> str:
+    def format_parse_result(self, result: ParseResult) -> str:
         """Format a parse result."""
         pass
 
     @abstractmethod
     def format_chunks(
-        self, chunks: list["ChunkResult"], file_path: str, strategy: str
+        self, chunks: list[ChunkResult], file_path: str, strategy: str
     ) -> str:
         """Format chunk results."""
         pass
 
     @abstractmethod
-    def format_metadata(self, metadata: "MetadataResult") -> str:
+    def format_metadata(self, metadata: MetadataResult) -> str:
         """Format metadata result."""
         pass
 
@@ -57,7 +57,7 @@ class TextFormatter(OutputFormatter):
         """
         self.max_chars = max_chars
 
-    def format_parse_result(self, result: "ParseResult") -> str:
+    def format_parse_result(self, result: ParseResult) -> str:
         """Format parse result as plain text."""
         text = result.text
         if self.max_chars and len(text) > self.max_chars:
@@ -65,7 +65,7 @@ class TextFormatter(OutputFormatter):
         return text
 
     def format_chunks(
-        self, chunks: list["ChunkResult"], file_path: str, strategy: str
+        self, chunks: list[ChunkResult], file_path: str, strategy: str
     ) -> str:
         """Format chunks as plain text."""
         lines = [
@@ -84,7 +84,7 @@ class TextFormatter(OutputFormatter):
 
         return "\n".join(lines)
 
-    def format_metadata(self, metadata: "MetadataResult") -> str:
+    def format_metadata(self, metadata: MetadataResult) -> str:
         """Format metadata as plain text."""
         lines = [
             f"File: {metadata.filename}",
@@ -126,7 +126,7 @@ class JSONFormatter(OutputFormatter):
             data, indent=self.indent, ensure_ascii=self.ensure_ascii, default=str
         )
 
-    def format_parse_result(self, result: "ParseResult") -> str:
+    def format_parse_result(self, result: ParseResult) -> str:
         """Format parse result as JSON."""
         return self._to_json(
             {
@@ -140,7 +140,7 @@ class JSONFormatter(OutputFormatter):
         )
 
     def format_chunks(
-        self, chunks: list["ChunkResult"], file_path: str, strategy: str
+        self, chunks: list[ChunkResult], file_path: str, strategy: str
     ) -> str:
         """Format chunks as JSON."""
         chunk_data = [
@@ -164,7 +164,7 @@ class JSONFormatter(OutputFormatter):
             }
         )
 
-    def format_metadata(self, metadata: "MetadataResult") -> str:
+    def format_metadata(self, metadata: MetadataResult) -> str:
         """Format metadata as JSON."""
         return self._to_json(metadata.to_dict())
 
@@ -196,7 +196,7 @@ class CSVFormatter(OutputFormatter):
             writer.writerow(row)
         return output.getvalue()
 
-    def format_parse_result(self, result: "ParseResult") -> str:
+    def format_parse_result(self, result: ParseResult) -> str:
         """Format parse result as CSV."""
         headers = ["file", "format", "word_count", "char_count", "metadata", "text"]
         metadata_json = json.dumps(result.metadata, ensure_ascii=False, default=str)
@@ -213,7 +213,7 @@ class CSVFormatter(OutputFormatter):
         return self._write_csv(headers, rows)
 
     def format_chunks(
-        self, chunks: list["ChunkResult"], file_path: str, strategy: str
+        self, chunks: list[ChunkResult], file_path: str, strategy: str
     ) -> str:
         """Format chunks as CSV."""
         headers = [
@@ -243,7 +243,7 @@ class CSVFormatter(OutputFormatter):
         ]
         return self._write_csv(headers, rows)
 
-    def format_metadata(self, metadata: "MetadataResult") -> str:
+    def format_metadata(self, metadata: MetadataResult) -> str:
         """Format metadata as CSV."""
         headers = [
             "file_path",
@@ -275,7 +275,7 @@ class CSVFormatter(OutputFormatter):
 class MarkdownFormatter(OutputFormatter):
     """Markdown formatter with headers and tables."""
 
-    def format_parse_result(self, result: "ParseResult") -> str:
+    def format_parse_result(self, result: ParseResult) -> str:
         """Format parse result as Markdown."""
         lines = [
             f"# Document: {Path(result.file_path).name}",
@@ -314,7 +314,7 @@ class MarkdownFormatter(OutputFormatter):
         return "\n".join(lines)
 
     def format_chunks(
-        self, chunks: list["ChunkResult"], file_path: str, strategy: str
+        self, chunks: list[ChunkResult], file_path: str, strategy: str
     ) -> str:
         """Format chunks as Markdown."""
         lines = [
@@ -352,7 +352,7 @@ class MarkdownFormatter(OutputFormatter):
 
         return "\n".join(lines)
 
-    def format_metadata(self, metadata: "MetadataResult") -> str:
+    def format_metadata(self, metadata: MetadataResult) -> str:
         """Format metadata as Markdown."""
         lines = [
             f"# Metadata: {metadata.filename}",
@@ -498,7 +498,7 @@ class XMLFormatter(OutputFormatter):
                     result += "_"
         return result or "item"
 
-    def format_parse_result(self, result: "ParseResult") -> str:
+    def format_parse_result(self, result: ParseResult) -> str:
         """Format parse result as XML."""
         root = ET.Element("document")
 
@@ -517,7 +517,7 @@ class XMLFormatter(OutputFormatter):
         return self._to_xml_string(root)
 
     def format_chunks(
-        self, chunks: list["ChunkResult"], file_path: str, strategy: str
+        self, chunks: list[ChunkResult], file_path: str, strategy: str
     ) -> str:
         """Format chunks as XML."""
         root = ET.Element("chunks")
@@ -545,7 +545,7 @@ class XMLFormatter(OutputFormatter):
 
         return self._to_xml_string(root)
 
-    def format_metadata(self, metadata: "MetadataResult") -> str:
+    def format_metadata(self, metadata: MetadataResult) -> str:
         """Format metadata as XML."""
         root = ET.Element("metadata")
 
@@ -603,12 +603,12 @@ class TemplateFormatter(OutputFormatter):
             ValueError: If neither template_path nor template_string is provided.
         """
         try:
-            from jinja2 import Environment, FileSystemLoader, BaseLoader
-        except ImportError:
+            from jinja2 import BaseLoader, Environment, FileSystemLoader
+        except ImportError as e:
             raise ImportError(
                 "Jinja2 is required for template formatting. "
                 "Install it with: pip install jinja2"
-            )
+            ) from e
 
         if template_path:
             template_path = Path(template_path)
@@ -626,7 +626,7 @@ class TemplateFormatter(OutputFormatter):
         else:
             raise ValueError("Either template_path or template_string must be provided")
 
-    def format_parse_result(self, result: "ParseResult") -> str:
+    def format_parse_result(self, result: ParseResult) -> str:
         """Format parse result using template."""
         return self.template.render(
             result=result,
@@ -640,7 +640,7 @@ class TemplateFormatter(OutputFormatter):
         )
 
     def format_chunks(
-        self, chunks: list["ChunkResult"], file_path: str, strategy: str
+        self, chunks: list[ChunkResult], file_path: str, strategy: str
     ) -> str:
         """Format chunks using template."""
         return self.template.render(
@@ -651,7 +651,7 @@ class TemplateFormatter(OutputFormatter):
             mode="chunks",
         )
 
-    def format_metadata(self, metadata: "MetadataResult") -> str:
+    def format_metadata(self, metadata: MetadataResult) -> str:
         """Format metadata using template."""
         return self.template.render(
             metadata=metadata,

@@ -235,4 +235,4 @@ def format_prompt(
     try:
         return template.format(**format_args)
     except KeyError as e:
-        raise ValueError(f"Missing required argument for prompt '{name}': {e}")
+        raise ValueError(f"Missing required argument for prompt '{name}': {e}") from e

@@ -57,7 +57,7 @@ class JSONExtractor(BaseExtractor):
         try:
             data = json.loads(content)
         except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON: {e}")
+            raise ValueError(f"Invalid JSON: {e}") from e
 
         # Pretty-print the JSON
         formatted_text = json.dumps(data, indent=self.indent, ensure_ascii=False)
@@ -180,7 +180,7 @@ class YAMLExtractor(BaseExtractor):
             # Load all documents in the YAML file
             documents = list(yaml.safe_load_all(content))
         except yaml.YAMLError as e:
-            raise ValueError(f"Invalid YAML: {e}")
+            raise ValueError(f"Invalid YAML: {e}") from e
 
         # Handle single vs multi-document YAML
         if len(documents) == 1:
@@ -260,7 +260,7 @@ class XMLExtractor(BaseExtractor):
             parser = etree.XMLParser(remove_comments=not self.include_comments)
             tree = etree.fromstring(content, parser=parser)
         except etree.XMLSyntaxError as e:
-            raise ValueError(f"Invalid XML: {e}")
+            raise ValueError(f"Invalid XML: {e}") from e
 
         # Extract text content
         text_parts = []

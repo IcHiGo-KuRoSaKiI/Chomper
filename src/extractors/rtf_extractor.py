@@ -51,7 +51,7 @@ class RTFExtractor(BaseExtractor):
         try:
             text = rtf_to_text(content)
         except Exception as e:
-            raise ValueError(f"Failed to parse RTF: {e}")
+            raise ValueError(f"Failed to parse RTF: {e}") from e
 
         # Clean up the text
         text = self._clean_text(text)
@@ -118,7 +118,7 @@ class RTFExtractor(BaseExtractor):
 
         return {
             "paragraph_count": len(paragraphs),
-            "line_count": len([l for l in lines if l.strip()]),
+            "line_count": len([line for line in lines if line.strip()]),
             "word_count": len(text.split()),
             "has_lists": has_lists,
             "has_tables": has_tables,

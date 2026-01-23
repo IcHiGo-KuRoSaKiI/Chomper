@@ -81,7 +81,7 @@ def cleanup_file(path):
     """Remove temporary file."""
     try:
         os.remove(path)
-    except:
+    except OSError:
         pass
 
 

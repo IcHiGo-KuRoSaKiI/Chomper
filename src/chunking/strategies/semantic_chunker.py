@@ -33,11 +33,11 @@ def _get_embedding_model(model_name: str):
         model = SentenceTransformer(model_name)
         _model_cache[model_name] = model
         return model
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "sentence-transformers is required for semantic chunking. "
             "Install with: pip install sentence-transformers"
-        )
+        ) from e
 
 
 class SemanticChunker(BaseChunker):

@@ -58,6 +58,10 @@ dev = [
     "black>=23.0.0",
     "ruff>=0.1.0",
     "mypy>=1.5.0",
+    # Type stubs
+    "types-PyYAML>=6.0.0",
+    "types-beautifulsoup4>=4.12.0",
+    "lxml-stubs>=0.5.0",
 ]
 
 minimal = [
@@ -67,6 +71,7 @@ minimal = [
 
 [project.scripts]
 chomper = "server:main"
+chomper-parse = "cli:main"
 
 [project.urls]
 Homepage = "https://github.com/IcHiGo-KuRoSaKiI/Chomper"
@@ -75,12 +80,14 @@ Repository = "https://github.com/IcHiGo-KuRoSaKiI/Chomper"
 Issues = "https://github.com/IcHiGo-KuRoSaKiI/Chomper/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src", "server.py"]
+packages = ["src", "server.py", "chomper.py", "cli.py"]
 
 [tool.hatch.build.targets.sdist]
 include = [
     "/src",
     "/server.py",
+    "/chomper.py",
+    "/cli.py",
     "/pyproject.toml",
     "/README.md",
 ]
@@ -92,6 +99,8 @@ target-version = ["py310", "py311", "py312"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -106,11 +115,26 @@ ignore = [
     "B008",  # function call in default argument
 ]
 
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/tests/*" = ["E402"]  # Tests need sys.path setup before imports
+"tests/*" = ["E402"]
+
 [tool.mypy]
 python_version = "3.10"
-warn_return_any = true
+warn_return_any = false  # Too noisy with dynamic libraries
 warn_unused_configs = true
 disallow_untyped_defs = true
+ignore_missing_imports = true
+# Only check project files
+files = ["src", "server.py", "chomper.py", "cli.py"]
+exclude = ["venv", "build", "dist", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["src.extractors.*", "src.chunking.*", "src.formatters.*"]
+disallow_untyped_defs = false  # Gradual typing for complex modules
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

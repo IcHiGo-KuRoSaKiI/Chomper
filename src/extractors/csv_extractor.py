@@ -260,12 +260,12 @@ class CSVExtractor(BaseExtractor):
                 try:
                     pd.to_numeric(sample)
                     column_types[col] = 'numeric_text'
-                except:
+                except (ValueError, TypeError):
                     # Check if convertible to datetime
                     try:
                         pd.to_datetime(sample)
                         column_types[col] = 'datetime_text'
-                    except:
+                    except (ValueError, TypeError):
                         column_types[col] = 'text'
             else:
                 column_types[col] = str(dtype)

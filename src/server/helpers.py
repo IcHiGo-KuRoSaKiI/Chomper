@@ -72,7 +72,7 @@ def parse_from_base64(content_base64: str, filename: str) -> tuple[Path, None]:
     try:
         content_bytes = base64.b64decode(content_base64)
     except Exception as e:
-        raise ValueError(f"Invalid base64 content: {e}")
+        raise ValueError(f"Invalid base64 content: {e}") from e
 
     # Write to temp file with correct extension
     temp_file = tempfile.NamedTemporaryFile(
@@ -87,7 +87,7 @@ def parse_from_base64(content_base64: str, filename: str) -> tuple[Path, None]:
         # Cleanup on error
         temp_file.close()
         Path(temp_file.name).unlink(missing_ok=True)
-        raise ValueError(f"Failed to write temp file: {e}")
+        raise ValueError(f"Failed to write temp file: {e}") from e
 
 
 def get_extractor_for_file(file_path: Path) -> Any:

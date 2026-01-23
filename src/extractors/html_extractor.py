@@ -10,7 +10,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 try:
-    from bs4 import BeautifulSoup, NavigableString, Tag
+    from bs4 import BeautifulSoup
     BS4_AVAILABLE = True
 except ImportError:
     BS4_AVAILABLE = False
@@ -197,7 +197,7 @@ class HTMLExtractor(BaseExtractor):
                     if traf_metadata.date:
                         try:
                             metadata.publish_date = datetime.fromisoformat(traf_metadata.date)
-                        except:
+                        except (ValueError, TypeError):
                             pass
             except Exception as e:
                 logger.warning(f"Trafilatura metadata extraction failed: {e}")
@@ -247,7 +247,7 @@ class HTMLExtractor(BaseExtractor):
                 import json
                 schema_data = json.loads(script.string)
                 metadata.schema_org.append(schema_data)
-            except:
+            except (json.JSONDecodeError, TypeError):
                 pass
 
         return metadata

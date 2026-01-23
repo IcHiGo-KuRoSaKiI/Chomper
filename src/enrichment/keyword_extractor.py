@@ -182,6 +182,6 @@ class KeywordExtractor(BaseEnricher):
             keywords = [feature_names[i] for i in top_indices if scores[i] > 0]
 
             return keywords
-        except:
+        except Exception:
             # Fallback to RAKE on error
             return self._rake_keywords(texts[0] if texts else "")
