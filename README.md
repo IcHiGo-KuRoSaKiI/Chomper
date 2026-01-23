@@ -63,6 +63,232 @@ Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/
 }
 ```
 
+## Python Library
+
+Chomper can be used as a standalone Python library for document parsing:
+
+```python
+import chomper
+
+# Parse a document
+result = chomper.parse("/path/to/document.pdf")
+print(result.text)
+print(result.metadata)
+print(f"Words: {result.word_count}, Format: {result.format}")
+
+# Parse from base64 (cloud storage, APIs, databases)
+import base64
+with open("doc.pdf", "rb") as f:
+    content = base64.b64encode(f.read()).decode()
+
+result = chomper.parse_bytes(content, "doc.pdf")
+
+# Quick metadata extraction
+meta = chomper.extract_metadata("/path/to/report.pdf")
+print(f"Author: {meta.author}, Pages: {meta.page_count}")
+
+# Chunk for RAG/embeddings
+chunks = chomper.chunk("/path/to/doc.pdf", strategy="semantic")
+for chunk in chunks:
+    print(f"Chunk {chunk.chunk_id}: {chunk.word_count} words")
+    print(f"Keywords: {chunk.keywords}")
+
+# Check format support
+if chomper.is_supported("report.pdf"):
+    result = chomper.parse("report.pdf")
+
+# List all formats
+formats = chomper.list_formats()
+for ext, info in formats.items():
+    if info["available"]:
+        print(f"{ext}: {info['description']}")
+```
+
+### API Reference
+
+| Function | Description |
+|----------|-------------|
+| `chomper.parse(file_path)` | Parse document, returns `ParseResult` |
+| `chomper.parse_bytes(content, filename)` | Parse from bytes/base64 |
+| `chomper.chunk(file_path, strategy)` | Split into chunks for RAG |
+| `chomper.extract_metadata(file_path)` | Quick metadata extraction |
+| `chomper.list_formats()` | List supported formats |
+| `chomper.is_supported(file_path)` | Check if format supported |
+
+### Result Objects
+
+```python
+# ParseResult
+result.text           # Extracted text content
+result.metadata       # Document metadata dict
+result.format         # File format (pdf, docx, etc.)
+result.word_count     # Total word count
+result.char_count     # Total character count
+
+# ChunkResult (from chomper.chunk())
+chunk.text            # Chunk text
+chunk.chunk_id        # Chunk index (0-based)
+chunk.word_count      # Words in chunk
+chunk.keywords        # Extracted keywords
+chunk.section_name    # Detected section name
+
+# MetadataResult (from chomper.extract_metadata())
+meta.filename         # Base filename
+meta.format           # File format
+meta.file_size        # Size in bytes
+meta.author           # Author (if available)
+meta.title            # Title (if available)
+meta.page_count       # Pages (if applicable)
+```
+
+## Command-Line Interface
+
+Parse documents directly from the command line:
+
+```bash
+# Parse and print text
+chomper-parse document.pdf
+
+# Output as JSON
+chomper-parse report.docx --json
+
+# Output in different formats (csv, markdown, xml)
+chomper-parse report.pdf --format markdown
+chomper-parse data.xlsx --format csv
+
+# Show metadata only
+chomper-parse data.xlsx --metadata
+
+# Split into chunks
+chomper-parse book.pdf --chunk --strategy semantic
+
+# Save to file
+chomper-parse document.pdf -o output.txt
+
+# List supported formats
+chomper-parse --formats
+
+# Quiet mode (no progress messages)
+chomper-parse document.pdf -q
+```
+
+### Output Formats
+
+```bash
+# Plain text (default)
+chomper-parse document.pdf
+
+# JSON output
+chomper-parse document.pdf --format json
+chomper-parse document.pdf --json  # shortcut
+
+# CSV output
+chomper-parse document.pdf --format csv
+
+# Markdown output
+chomper-parse document.pdf --format markdown
+
+# XML output
+chomper-parse document.pdf --format xml
+
+# Custom Jinja2 template
+chomper-parse document.pdf --format template --template my_template.j2
+```
+
+### Watch Mode
+
+Monitor a directory for new/changed files and auto-parse them:
+
+```bash
+# Watch a directory
+chomper-parse --watch ./documents
+
+# Watch with JSON output saved to files
+chomper-parse --watch ./inbox --format json --output-dir ./parsed
+
+# Watch only PDFs, check every 5 seconds
+chomper-parse --watch ./docs --pattern "*.pdf" --interval 5
+
+# Watch recursively (including subdirectories)
+chomper-parse --watch ./project --recursive
+
+# Watch with metadata only
+chomper-parse --watch ./docs --metadata --format json
+```
+
+### Interactive Mode
+
+Start an interactive shell for parsing multiple documents:
+
+```bash
+$ chomper-parse -i
+Chomper Interactive Mode
+Type 'help' for commands, 'exit' to quit.
+
+chomper> parse ~/Documents/report.pdf
+[Document content displayed...]
+
+chomper> set format json
+Output format set to: json
+
+chomper> metadata ~/Documents/report.pdf
+{
+  "filename": "report.pdf",
+  "format": "pdf",
+  "page_count": 5
+}
+
+chomper> history
+Files parsed this session:
+  1. /Users/me/Documents/report.pdf
+
+chomper> help
+[Shows all available commands]
+
+chomper> exit
+```
+
+**Interactive Commands:**
+| Command | Description |
+|---------|-------------|
+| `parse <file>` | Parse a document |
+| `metadata <file>` | Show metadata only |
+| `chunk <file>` | Split into chunks |
+| `formats` | List supported formats |
+| `set format <name>` | Set output format |
+| `set json on/off` | Toggle JSON mode |
+| `set max-chars N` | Limit output |
+| `history` | Show parsed files |
+| `status` | Show current settings |
+| `help` | Show all commands |
+| `exit` | Exit interactive mode |
+
+### CLI Options
+
+| Option | Description |
+|--------|-------------|
+| `-f, --format` | Output format: `text`, `json`, `csv`, `markdown`, `xml`, `template` |
+| `--template` | Jinja2 template file (with `--format template`) |
+| `--json` | Shortcut for `--format json` |
+| `--metadata` | Show metadata only |
+| `--chunk` | Split into chunks |
+| `--strategy` | Chunking: `auto`, `semantic`, `fixed` |
+| `--chunk-size` | Words per chunk (default: 1000) |
+| `--max-chars` | Limit output characters |
+| `-o, --output` | Save to file |
+| `-i, --interactive` | Start interactive mode |
+| `-w, --watch` | Watch directory for changes |
+| `--interval` | Watch interval in seconds (default: 2) |
+| `--output-dir` | Save watch output to directory |
+| `--pattern` | File pattern for watch mode |
+| `--recursive` | Watch subdirectories |
+| `--formats` | List supported formats |
+| `-q, --quiet` | Suppress progress messages |
+
+## MCP Tools
+
+The following tools are available via the MCP server:
+
 ## Available Tools
 
 ### 1. `parse_document`
