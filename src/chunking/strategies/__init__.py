@@ -7,6 +7,7 @@ from .html_chunker import HTMLChunker
 from .markdown_chunker import MarkdownChunker
 from .pdf_chunker import PDFChunker
 from .pptx_chunker import PPTXChunker
+from .structural_pdf_chunker import StructuralPDFChunker
 from .text_chunker import TextChunker
 
 # Semantic chunker (requires sentence-transformers, lazy-loaded)
@@ -17,6 +18,7 @@ except ImportError:
 
 __all__ = [
     "PDFChunker",
+    "StructuralPDFChunker",
     "DOCXChunker",
     "PPTXChunker",
     "CodeChunker",

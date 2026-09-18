@@ -188,8 +188,10 @@ class PDFChunker(BaseChunker):
         # Check if chunk has images
         has_images = any(item["type"] == "image" for item in items)
 
-        # Get position range
-        positions = [item["position"] for item in items]
+        # Get position range. ``position`` is optional by contract: not every
+        # content item carries layout information (markdown-mode text once did
+        # not, which is what made this a KeyError rather than a missing range).
+        positions = [item["position"] for item in items if item.get("position")]
         if positions:
             min_y = min(pos.get("y0", pos.get("y1", 0)) for pos in positions)
             max_y = max(pos.get("y1", pos.get("y0", 0)) for pos in positions)

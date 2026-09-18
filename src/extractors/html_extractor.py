@@ -4,6 +4,8 @@ HTML extractor using BeautifulSoup4 and Trafilatura.
 Extracts text, tables, lists, forms, links, and metadata from HTML files and web pages.
 Handles boilerplate removal, article extraction, and semantic structure detection.
 """
+from __future__ import annotations
+
 import logging
 from datetime import datetime
 from typing import Any

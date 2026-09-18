@@ -100,10 +100,22 @@ class PDFExtractor(BaseExtractor):
 
         pdf_document.close()
 
+        # Images are nested inside each page's ``content``, but callers look for a
+        # top-level ``structure["images"]`` list (see ``chomper.parse`` and
+        # ``chomper.extract_metadata``). Without this aggregate the images were
+        # extracted and then silently dropped -- reported as issue #1.
+        # ``pages`` is still present, so nothing that already walked pages breaks.
+        images = [
+            {**item, "page": item.get("page", page["page_number"])}
+            for page in pages
+            for item in page["content"]
+            if item.get("type") == "image"
+        ]
+
         return RawDocument(
             text=full_text,
             metadata=metadata,
-            structure={"pages": pages}
+            structure={"pages": pages, "images": images}
         )
 
     def _extract_with_markdown(self, file_path: str, pdf_document) -> tuple:
@@ -140,12 +152,27 @@ class PDFExtractor(BaseExtractor):
                 "markdown_text": page_text
             }
 
-            # Add text content
+            # Add text content.
+            #
+            # ``position`` is always present, even in markdown mode. Downstream
+            # chunkers index ``item["position"]`` unconditionally, so omitting it
+            # raised ``KeyError: 'position'`` and broke the default PDF chunking
+            # path entirely. Markdown text spans the whole page, so the page
+            # rectangle is the honest bounding box for it.
             if page_text.strip():
+                if page_idx < len(pdf_document):
+                    rect = pdf_document[page_idx].rect
+                    position = {
+                        "x0": rect.x0, "y0": rect.y0,
+                        "x1": rect.x1, "y1": rect.y1,
+                    }
+                else:  # pragma: no cover - defensive
+                    position = {"x0": 0.0, "y0": 0.0, "x1": 0.0, "y1": 0.0}
                 page_data["content"].append({
                     "type": "text",
                     "content": page_text,
-                    "format": "markdown"
+                    "format": "markdown",
+                    "position": position,
                 })
 
             # Extract images for this page

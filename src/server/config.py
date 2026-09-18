@@ -10,6 +10,7 @@ from src.chunking.strategies import (
     MarkdownChunker,
     PDFChunker,
     PPTXChunker,
+    StructuralPDFChunker,
     TextChunker,
 )
 from src.extractors import (
@@ -111,7 +112,10 @@ def initialize_extractors() -> None:
     # Optional extractors (require heavy dependencies)
     if PDFExtractor is not None:
         EXTRACTORS[".pdf"] = PDFExtractor
-        CHUNKERS[".pdf"] = PDFChunker
+        # Structural chunking is the default for PDFs: heading-bounded,
+        # table-safe and sentence-safe. PDFChunker remains importable for
+        # callers that specifically want page or word-count slicing.
+        CHUNKERS[".pdf"] = StructuralPDFChunker
 
     if DOCXExtractor is not None:
         EXTRACTORS[".docx"] = DOCXExtractor
