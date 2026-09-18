@@ -241,6 +241,38 @@ def _validate_path(file_path: str | Path) -> Path:
 # =============================================================================
 
 
+def _collect_images(raw_doc) -> list[dict[str, Any]]:
+    """Gather image records from a RawDocument, however the extractor nested them.
+
+    Extractors are inconsistent: some advertise a top-level ``structure["images"]``,
+    others (PDF, PPTX) nest image items inside per-page or per-slide ``content``
+    lists. Callers previously read only the top-level key, so nested images were
+    extracted and then silently discarded -- issue #1. Checking both keeps every
+    extractor working without forcing them all to change shape.
+    """
+    structure = getattr(raw_doc, "structure", None) or {}
+    if not isinstance(structure, dict):
+        return []
+
+    images = structure.get("images")
+    if isinstance(images, list) and images:
+        return images
+
+    collected: list[dict[str, Any]] = []
+    for key in ("pages", "slides"):
+        for index, container in enumerate(structure.get(key) or [], start=1):
+            if not isinstance(container, dict):
+                continue
+            for item in container.get("content") or []:
+                if isinstance(item, dict) and item.get("type") == "image":
+                    collected.append(
+                        {**item, "page": item.get("page", container.get(
+                            "page_number", container.get("slide_number", index)
+                        ))}
+                    )
+    return collected
+
+
 def parse(
     file_path: str | Path,
     *,
