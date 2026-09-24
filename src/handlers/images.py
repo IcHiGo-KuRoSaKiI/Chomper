@@ -107,7 +107,7 @@ async def handle_get_document_images(arguments: dict[str, Any]) -> list[TextCont
         # Actual image as ImageContent
         base64_data = img.get("base64", "")
         if base64_data:
-            mime_type = detect_mime_type(base64_data)
+            mime_type = img.get("mime_type") or detect_mime_type(base64_data)
             response_items.append(ImageContent(
                 type="image",
                 data=base64_data,

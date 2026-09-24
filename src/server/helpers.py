@@ -10,6 +10,7 @@ from typing import Any
 
 from mcp.types import TextContent
 
+from ..extractors.image_utils import collect_images, detect_mime_type  # noqa: F401
 from .config import CHUNKERS, EXTRACTORS
 
 
@@ -145,43 +146,31 @@ def extract_images_from_structure(
     max_images: int | None = None
 ) -> list[dict[str, Any]]:
     """
-    Extract images from PDF structure.
+    Extract images from any document structure (PDF pages, PPTX slides,
+    DOCX sections, or a flat top-level list).
 
     Args:
         structure: Document structure from extraction
-        page_filter: If set, only return images from this page (1-indexed)
+        page_filter: If set, only return images from this page/slide (1-indexed)
         max_images: Maximum number of images to return
 
     Returns:
-        List of image dictionaries with page, base64, width, height
+        List of image dictionaries with page, pages, base64, mime_type,
+        width, height, position. Identical images (a logo on every page) are
+        returned once, with ``pages`` listing every page they appear on.
     """
-    images = []
-
-    if not structure or "pages" not in structure:
-        return images
-
-    for page in structure["pages"]:
-        page_number = page.get("page_number", 0)
-
-        # Filter by page if specified
-        if page_filter is not None and page_number != page_filter:
-            continue
-
-        for item in page.get("content", []):
-            if item.get("type") == "image":
-                images.append({
-                    "page": page_number,
-                    "base64": item.get("content", ""),
-                    "width": item.get("width", 0),
-                    "height": item.get("height", 0),
-                    "position": item.get("position", {})
-                })
-
-                # Check max_images limit
-                if max_images is not None and len(images) >= max_images:
-                    return images
-
-    return images
+    return [
+        {
+            "page": img.get("page"),
+            "pages": img.get("pages", [img.get("page")]),
+            "base64": img["content"],
+            "mime_type": img["mime_type"],
+            "width": img.get("width", 0),
+            "height": img.get("height", 0),
+            "position": img.get("position", {}),
+        }
+        for img in collect_images(structure, page_filter=page_filter, max_images=max_images)
+    ]
 
 
 def remove_image_placeholders(text: str) -> str:
@@ -197,29 +186,6 @@ def remove_image_placeholders(text: str) -> str:
     # Remove patterns like [Image: 800x600], [Image: 1024x768], etc.
     pattern = r'\[Image:\s*\d+x\d+\]\s*'
     return re.sub(pattern, '', text)
-
-
-def detect_mime_type(base64_data: str) -> str:
-    """
-    Detect MIME type from base64 data prefix.
-
-    Args:
-        base64_data: Base64 encoded image data
-
-    Returns:
-        MIME type string
-    """
-    if base64_data.startswith("/9j/"):
-        return "image/jpeg"
-    elif base64_data.startswith("R0lGOD"):
-        return "image/gif"
-    elif base64_data.startswith("iVBOR"):
-        return "image/png"
-    elif base64_data.startswith("UklGR"):
-        return "image/webp"
-    else:
-        # Default to PNG
-        return "image/png"
 
 
 def format_error_response(error: Exception) -> list[TextContent]:

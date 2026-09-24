@@ -3,15 +3,20 @@ PPTX extractor using python-pptx.
 
 Extracts text, images, and slide structure from PowerPoint presentations.
 """
-import base64
-import io
+import logging
 from typing import Any
 
-from PIL import Image
 from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE, PP_PLACEHOLDER
+from pptx.shapes.picture import Picture
 
 from ..models.document import RawDocument
 from .base import BaseExtractor
+from .image_utils import image_record
+
+logger = logging.getLogger(__name__)
+
+EMU_PER_POINT = 12700
 
 
 class PPTXExtractor(BaseExtractor):
@@ -62,6 +67,10 @@ class PPTXExtractor(BaseExtractor):
         self.validate_file(file_path)
 
         # Open PPTX
+        if file_path.lower().endswith(".ppt"):
+            raise ValueError(
+                "Legacy binary .ppt files can't be read; save the deck as .pptx first."
+            )
         prs = Presentation(file_path)
 
         # Extract slides
@@ -102,47 +111,16 @@ class PPTXExtractor(BaseExtractor):
                 "content": []
             }
 
-            # Extract text from shapes
-            for shape in slide.shapes:
-                # Text boxes and placeholders
-                if hasattr(shape, "text") and shape.text.strip():
-                    # Detect if this is a title
-                    is_title = hasattr(shape, "placeholder_format") and \
-                               shape.placeholder_format.type == 1  # Title placeholder
-
-                    slide_data["content"].append({
-                        "type": "title" if is_title else "text",
-                        "text": shape.text
-                    })
-
-                # Tables
-                if shape.has_table:
-                    table_text = self._process_table(shape.table)
-                    slide_data["content"].append({
-                        "type": "table",
-                        "text": table_text
-                    })
-
-                # Images
-                if shape.shape_type == 13:  # Picture
-                    try:
-                        image = shape.image
-                        image_bytes = image.blob
-
-                        # Check dimensions
-                        image_pil = Image.open(io.BytesIO(image_bytes))
-                        width, height = image_pil.size
-
-                        if width >= self.min_image_width and height >= self.min_image_height:
-                            slide_data["content"].append({
-                                "type": "image",
-                                "content": base64.b64encode(image_bytes).decode('utf-8'),
-                                "width": width,
-                                "height": height
-                            })
-                    except Exception:
-                        # Skip problematic images
-                        continue
+            for shape, in_group in self._iter_shapes(slide.shapes):
+                # One odd shape (linked picture, OLE object, broken XML) must
+                # not take the rest of the slide -- or the deck -- down with it.
+                try:
+                    item = self._shape_content(shape, in_group, slide_num)
+                except Exception as e:
+                    logger.warning(f"Skipping shape {shape.shape_id} on slide {slide_num}: {e}")
+                    continue
+                if item:
+                    slide_data["content"].append(item)
 
             # Extract notes
             if self.extract_notes and slide.has_notes_slide:
@@ -156,6 +134,50 @@ class PPTXExtractor(BaseExtractor):
             slides.append(slide_data)
 
         return slides
+
+    def _iter_shapes(self, shapes, in_group: bool = False):
+        """Yield ``(shape, in_group)`` for every shape, descending into groups."""
+        for shape in shapes:
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                yield from self._iter_shapes(shape.shapes, in_group=True)
+            else:
+                yield shape, in_group
+
+    def _shape_content(self, shape, in_group: bool, slide_num: int) -> dict[str, Any] | None:
+        """Turn one shape into a content item, or ``None`` if it carries nothing."""
+        # Pictures, including pictures dropped into a layout's picture
+        # placeholder (PlaceholderPicture subclasses Picture, but its
+        # shape_type is PLACEHOLDER, not PICTURE -- so check the class).
+        if isinstance(shape, Picture):
+            extra: dict[str, Any] = {"page": slide_num, "slide": slide_num}
+            # Group children use the group's own coordinate space, so only
+            # top-level shapes get a slide position (in points, like PDF).
+            if not in_group and shape.left is not None and shape.top is not None:
+                extra["position"] = {
+                    "x0": shape.left / EMU_PER_POINT,
+                    "y0": shape.top / EMU_PER_POINT,
+                    "x1": (shape.left + shape.width) / EMU_PER_POINT,
+                    "y1": (shape.top + shape.height) / EMU_PER_POINT,
+                }
+            return image_record(
+                shape.image.blob, self.min_image_width, self.min_image_height, **extra
+            )
+
+        if getattr(shape, "has_table", False) and shape.has_table:
+            return {"type": "table", "text": self._process_table(shape.table)}
+
+        if getattr(shape, "has_text_frame", False) and shape.has_text_frame:
+            text = shape.text_frame.text
+            if text.strip():
+                # ``placeholder_format`` raises ValueError (not AttributeError)
+                # on ordinary shapes, so ``hasattr`` is not a safe probe.
+                is_title = shape.is_placeholder and shape.placeholder_format.type in (
+                    PP_PLACEHOLDER.TITLE,
+                    PP_PLACEHOLDER.CENTER_TITLE,
+                )
+                return {"type": "title" if is_title else "text", "text": text}
+
+        return None
 
     def _process_table(self, table) -> str:
         """

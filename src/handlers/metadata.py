@@ -15,6 +15,7 @@ from src.server.config import (
     OUTPUT_FORMAT_TOON,
 )
 from src.server.helpers import (
+    extract_images_from_structure,
     get_extractor_for_file,
     validate_file_path,
 )
@@ -77,15 +78,11 @@ async def handle_extract_metadata(arguments: dict[str, Any]) -> list[TextContent
         }
     }
 
-    if extension == ".pdf" and raw_doc.structure:
-        pages = raw_doc.structure.get("pages", [])
-        image_count = sum(
-            1 for page in pages
-            for item in page.get("content", [])
-            if item.get("type") == "image"
-        )
-        response["document_info"]["page_count"] = len(pages)
-        response["document_info"]["image_count"] = image_count
+    if page_count is not None:
+        response["document_info"]["page_count"] = page_count
+    response["document_info"]["image_count"] = len(
+        extract_images_from_structure(raw_doc.structure)
+    )
 
     return [TextContent(type="text", text=json.dumps(response, indent=2, default=str))]
 

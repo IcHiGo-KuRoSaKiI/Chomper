@@ -4,16 +4,14 @@ PDF extractor using PyMuPDF and PyMuPDF4LLM.
 Extracts text (with proper Markdown formatting including tables),
 images, and layout from PDF documents.
 """
-import base64
-import io
 import logging
 from typing import Any
 
 import fitz
-from PIL import Image
 
 from ..models.document import RawDocument
 from .base import BaseExtractor
+from .image_utils import image_record
 
 # Try to import pymupdf4llm for better markdown output
 try:
@@ -211,40 +209,48 @@ class PDFExtractor(BaseExtractor):
                 if not masks:
                     continue
 
-                # Extract image data
                 base_image = pdf_document.extract_image(xref)
-                image_bytes = base_image["image"]
-
-                # Check dimensions
-                image_pil = Image.open(io.BytesIO(image_bytes))
-                width, height = image_pil.size
-
-                # Skip small images
-                if width < self.min_image_width or height < self.min_image_height:
-                    continue
-
-                # Get position from first mask
                 mask = masks[0]
-
-                images.append({
-                    "type": "image",
-                    "content": base64.b64encode(image_bytes).decode('utf-8'),
-                    "width": width,
-                    "height": height,
-                    "page": page_idx + 1,
-                    "position": {
-                        "x0": mask.x0,
-                        "y0": mask.y0,
-                        "x1": mask.x1,
-                        "y1": mask.y1
-                    }
-                })
+                record = image_record(
+                    self._image_bytes(pdf_document, xref, base_image),
+                    self.min_image_width,
+                    self.min_image_height,
+                    page=page_idx + 1,
+                    position={"x0": mask.x0, "y0": mask.y0, "x1": mask.x1, "y1": mask.y1},
+                )
+                if record:
+                    images.append(record)
 
             except Exception as e:
                 logger.warning(f"Failed to extract image {img_index + 1} from page {page_idx + 1}: {e}")
                 continue
 
         return images
+
+    @staticmethod
+    def _image_bytes(pdf_document, xref: int, base_image: dict[str, Any]) -> bytes:
+        """
+        Bytes for one embedded image, rendered through MuPDF when the raw stream
+        would come out wrong.
+
+        ``extract_image`` returns the raw stream only. Transparency lives in a
+        separate soft-mask object, so dropping it paints transparent areas
+        black; JPEG 2000, JBIG2, CCITT and CMYK streams are ones clients cannot
+        show. MuPDF decodes all of them, so render those to PNG instead.
+        """
+        smask = base_image.get("smask") or 0
+        if not smask and base_image.get("ext") in ("png", "jpeg", "jpg"):
+            return base_image["image"]
+        try:
+            pix = fitz.Pixmap(pdf_document, xref)
+            if pix.colorspace and pix.colorspace.n > 3:
+                pix = fitz.Pixmap(fitz.csRGB, pix)
+            if smask:
+                pix = fitz.Pixmap(pix, fitz.Pixmap(pdf_document, smask))
+            return pix.tobytes("png")
+        except Exception as e:
+            logger.debug(f"Pixmap render failed for xref {xref}, using raw stream: {e}")
+            return base_image["image"]
 
     def _extract_pages(self, pdf_document) -> list[dict[str, Any]]:
         """

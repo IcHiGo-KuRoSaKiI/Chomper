@@ -63,17 +63,11 @@ async def handle_parse_document(arguments: dict[str, Any]) -> list[TextContent |
     total_words = len(clean_text.split())
     extension = file_path.suffix.lower()
 
-    # Get page/image count for PDFs
+    # Page count for PDFs; image count for every format that carries images
     page_count = None
-    image_count = 0
     if extension == ".pdf" and raw_doc.structure:
-        pages = raw_doc.structure.get("pages", [])
-        page_count = len(pages)
-        image_count = sum(
-            1 for page in pages
-            for item in page.get("content", [])
-            if item.get("type") == "image"
-        )
+        page_count = len(raw_doc.structure.get("pages", []))
+    image_count = len(extract_images_from_structure(raw_doc.structure))
 
     # Determine text to return
     if full_text or total_chars <= DEFAULT_SUMMARY_CHARS:
@@ -124,11 +118,12 @@ async def handle_parse_document(arguments: dict[str, Any]) -> list[TextContent |
                 f"Use get_document_chunk(file_path, offset={DEFAULT_SUMMARY_CHARS}) for more."
             )
 
-        # Add page/image count for PDFs
+        # Add page count for PDFs; image count for any format with images
         if page_count is not None:
             metadata_dict["page_count"] = page_count
+        if image_count > 0:
             metadata_dict["image_count"] = image_count
-            if image_count > 0 and not include_images:
+            if not include_images:
                 metadata_dict["images_hint"] = (
                     f"Document contains {image_count} images. "
                     f"Use get_document_images(file_path) to retrieve them."
@@ -168,7 +163,7 @@ async def handle_parse_document(arguments: dict[str, Any]) -> list[TextContent |
             # Add actual image as ImageContent
             base64_data = img.get("base64", "")
             if base64_data:
-                mime_type = detect_mime_type(base64_data)
+                mime_type = img.get("mime_type") or detect_mime_type(base64_data)
                 response_items.append(ImageContent(
                     type="image",
                     data=base64_data,

@@ -245,32 +245,15 @@ def _collect_images(raw_doc) -> list[dict[str, Any]]:
     """Gather image records from a RawDocument, however the extractor nested them.
 
     Extractors are inconsistent: some advertise a top-level ``structure["images"]``,
-    others (PDF, PPTX) nest image items inside per-page or per-slide ``content``
-    lists. Callers previously read only the top-level key, so nested images were
-    extracted and then silently discarded -- issue #1. Checking both keeps every
-    extractor working without forcing them all to change shape.
+    others (PDF, PPTX, DOCX) nest image items inside per-page, per-slide or
+    per-section ``content`` lists. Reading only one of those shapes is how images
+    were extracted and then silently discarded (issue #1 for PDF, and PPTX after
+    that). This delegates to the one shared walker every entry point uses.
+    Identical images are returned once, with ``pages`` listing where they appear.
     """
-    structure = getattr(raw_doc, "structure", None) or {}
-    if not isinstance(structure, dict):
-        return []
+    from src.extractors.image_utils import collect_images
 
-    images = structure.get("images")
-    if isinstance(images, list) and images:
-        return images
-
-    collected: list[dict[str, Any]] = []
-    for key in ("pages", "slides"):
-        for index, container in enumerate(structure.get(key) or [], start=1):
-            if not isinstance(container, dict):
-                continue
-            for item in container.get("content") or []:
-                if isinstance(item, dict) and item.get("type") == "image":
-                    collected.append(
-                        {**item, "page": item.get("page", container.get(
-                            "page_number", container.get("slide_number", index)
-                        ))}
-                    )
-    return collected
+    return collect_images(getattr(raw_doc, "structure", None))
 
 
 def parse(
@@ -324,11 +307,7 @@ def parse(
     char_count = len(text)
 
     # Extract images info if requested
-    images = []
-    if include_images and hasattr(raw_doc, 'structure'):
-        structure = raw_doc.structure or {}
-        if 'images' in structure:
-            images = structure['images']
+    images = _collect_images(raw_doc) if include_images else []
 
     return ParseResult(
         text=text,
@@ -551,10 +530,7 @@ def extract_metadata(file_path: str | Path) -> MetadataResult:
         text = text.get('text', str(text))
 
     # Count images
-    image_count = 0
-    if hasattr(raw_doc, 'structure') and raw_doc.structure:
-        images = raw_doc.structure.get('images', [])
-        image_count = len(images) if isinstance(images, list) else 0
+    image_count = len(_collect_images(raw_doc))
 
     return MetadataResult(
         file_path=str(path),

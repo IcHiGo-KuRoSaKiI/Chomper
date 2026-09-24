@@ -3,8 +3,6 @@ DOCX extractor using python-docx.
 
 Extracts text, headings, images, and tables from DOCX documents.
 """
-import base64
-import io
 from typing import Any
 
 from docx import Document
@@ -13,10 +11,10 @@ from docx.oxml.table import CT_Tbl
 from docx.oxml.text.paragraph import CT_P
 from docx.table import Table, _Cell
 from docx.text.paragraph import Paragraph
-from PIL import Image
 
 from ..models.document import RawDocument
 from .base import BaseExtractor
+from .image_utils import image_record
 
 
 class DOCXExtractor(BaseExtractor):
@@ -233,17 +231,11 @@ class DOCXExtractor(BaseExtractor):
                                             image_part = doc.part.related_parts[image_rid]
                                             image_blob = image_part.blob
 
-                                            # Check dimensions
-                                            image_pil = Image.open(io.BytesIO(image_blob))
-                                            width, height = image_pil.size
-
-                                            if width >= self.min_image_width and height >= self.min_image_height:
-                                                images.append({
-                                                    "type": "image",
-                                                    "content": base64.b64encode(image_blob).decode('utf-8'),
-                                                    "width": width,
-                                                    "height": height
-                                                })
+                                            record = image_record(
+                                                image_blob, self.min_image_width, self.min_image_height
+                                            )
+                                            if record:
+                                                images.append(record)
                 except Exception:
                     # Skip problematic images
                     continue
@@ -268,17 +260,11 @@ class DOCXExtractor(BaseExtractor):
                                 image_part = doc.part.related_parts[image_rid]
                                 image_blob = image_part.blob
 
-                                # Check dimensions
-                                image_pil = Image.open(io.BytesIO(image_blob))
-                                width, height = image_pil.size
-
-                                if width >= self.min_image_width and height >= self.min_image_height:
-                                    images.append({
-                                        "type": "image",
-                                        "content": base64.b64encode(image_blob).decode('utf-8'),
-                                        "width": width,
-                                        "height": height
-                                    })
+                                record = image_record(
+                                    image_blob, self.min_image_width, self.min_image_height
+                                )
+                                if record:
+                                    images.append(record)
                 except Exception:
                     # Skip problematic images
                     continue
