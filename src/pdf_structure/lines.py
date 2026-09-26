@@ -10,6 +10,8 @@ Everything downstream in :mod:`src.pdf_structure` works from :class:`PageLine`.
 
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass
 from typing import Any
 
@@ -124,6 +126,31 @@ def extract_lines(pdf_document: Any) -> list[PageLine]:
                 font = str(dominant.get("font", ""))
                 bbox = tuple(float(v) for v in line.get("bbox", (0, 0, 0, 0)))
 
+                title = lines[-1] if lines else None
+                if (
+                    title is not None
+                    and title.page == page_index + 1
+                    and _joins_section_number(title, text, bbox, size, font, spans)
+                ):
+                    # "3.1" and its title arrive as two runs on one row (LaTeX
+                    # does this). Joined, the numbering signal can fire and the
+                    # number cannot be stranded at the end of the previous chunk.
+                    lines[-1] = PageLine(
+                        page=title.page,
+                        ordinal=title.ordinal,
+                        text=f"{title.text} {text}",
+                        bbox=(
+                            min(title.bbox[0], bbox[0]), min(title.bbox[1], bbox[1]),
+                            max(title.bbox[2], bbox[2]), max(title.bbox[3], bbox[3]),
+                        ),
+                        size=max(title.size, size),
+                        font=font,
+                        bold=True,
+                        y_frac=title.y_frac,
+                        page_height=height,
+                    )
+                    continue
+
                 lines.append(
                     PageLine(
                         page=page_index + 1,
@@ -140,6 +167,35 @@ def extract_lines(pdf_document: Any) -> list[PageLine]:
                 ordinal += 1
 
     return lines
+
+
+_SECTION_NUMBER = re.compile(r"^(?:[A-Z]|\d+)(?:\.\d+)*\.?$")
+
+
+def _joins_section_number(
+    number: PageLine,
+    text: str,
+    bbox: tuple[float, ...],
+    size: float,
+    font: str,
+    spans: list[dict],
+) -> bool:
+    """True when ``number`` is a bare bold section number and ``text`` its title.
+
+    Both runs must be bold, the same size and on one row, with the title just to
+    the right and carrying words. Bold numeric table cells fail the last test.
+    """
+    if not number.bold or not _SECTION_NUMBER.match(number.text):
+        return False
+    dominant = max(spans, key=lambda s: len(s.get("text", "") or ""))
+    if not _is_bold(font, int(dominant.get("flags", 0))):
+        return False
+    if abs(number.size - size) > 0.5 or sum(c.isalpha() for c in text) < 2:
+        return False
+    height = max(number.bbox[3] - number.bbox[1], 1e-6)
+    overlap = min(number.bbox[3], bbox[3]) - max(number.bbox[1], bbox[1])
+    gap = bbox[0] - number.bbox[2]
+    return overlap >= 0.5 * height and 0 <= gap <= 1.5 * max(size, 1.0)
 
 
 def body_size(lines: list[PageLine]) -> float:

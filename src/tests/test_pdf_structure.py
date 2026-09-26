@@ -790,6 +790,27 @@ class TestNoise:
         assert len(kept) == 2
 
 
+class TestSectionNumberRuns:
+    """LaTeX sets "3.1" and its title as two text runs on one row."""
+
+    def test_number_joins_its_title_but_not_table_cells(self, tmp_path):
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 100), "3.1", fontname="hebo", fontsize=10)
+        page.insert_text((98, 100), "Training Pipeline", fontname="hebo", fontsize=10)
+        page.insert_text((72, 140), "2.34", fontname="hebo", fontsize=9)
+        page.insert_text((110, 140), "334.34", fontname="hebo", fontsize=9)
+        page.insert_text((72, 180), "4", fontname="helv", fontsize=9)
+        page.insert_text((90, 180), "EdgeCNN", fontname="helv", fontsize=9)
+        path = tmp_path / "runs.pdf"
+        doc.save(path)
+        texts = [line.text for line in extract_lines(fitz.open(path))]
+        assert "3.1 Training Pipeline" in texts
+        assert "2.34" in texts and "334.34" in texts
+        assert "4" in texts and "EdgeCNN" in texts
+        assert [l.ordinal for l in extract_lines(fitz.open(path))] == list(range(len(texts)))
+
+
 class TestBoldHeadingFilters:
     """Body-size bold lines that are not section headings (seen on a real paper)."""
 
