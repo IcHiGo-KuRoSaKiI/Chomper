@@ -16,7 +16,8 @@ Two independent views, because each catches what the other misses:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from typing import Any
 
 from .lines import PageLine
 
@@ -34,6 +35,75 @@ class TableRegion:
     cols: int
     ordinals: frozenset[int]
     """Ordinals of the lines that fall inside the table bbox."""
+    header: tuple[str, ...] = ()
+    data_rows: tuple[tuple[str, ...], ...] = ()
+    header_external: bool = False
+    page_height: float = 0.0
+
+    @property
+    def markdown(self) -> str:
+        """The region's cell grid rendered as a constant-width pipe table."""
+        return render_markdown_table(self.header, self.data_rows, self.cols)
+
+
+def extract_table_data(
+    table: Any,
+) -> tuple[tuple[str, ...], tuple[tuple[str, ...], ...], int, bool]:
+    """Extract a PyMuPDF table into header, body, width and header provenance."""
+    extracted = tuple(
+        tuple("" if cell is None else str(cell) for cell in row)
+        for row in (table.extract() or ())
+    )
+    header_object = getattr(table, "header", None)
+    header_names = tuple(
+        "" if cell is None else str(cell)
+        for cell in (getattr(header_object, "names", None) or ())
+    )
+    header_external = bool(getattr(header_object, "external", False))
+    columns = max(
+        int(getattr(table, "col_count", 0) or 0),
+        len(header_names),
+        max((len(row) for row in extracted), default=0),
+    )
+
+    if header_names:
+        header = header_names
+        # Internal headers are the first extracted row. External headers are not
+        # part of ``extract()`` and therefore must not consume the first data row.
+        data_rows = extracted if header_external else extracted[1:]
+    elif extracted:
+        header, data_rows = extracted[0], extracted[1:]
+    else:
+        header, data_rows = tuple("" for _ in range(columns)), ()
+
+    return header, data_rows, columns, header_external
+
+
+def render_markdown_table(
+    header: tuple[str, ...],
+    rows: tuple[tuple[str, ...], ...],
+    column_count: int,
+) -> str:
+    """Render cells as GitHub-flavoured markdown without changing their order."""
+    columns = max(column_count, len(header), max((len(row) for row in rows), default=0))
+    if columns <= 0:
+        return ""
+
+    def render_row(row: tuple[str, ...]) -> str:
+        cells = list(row[:columns]) + [""] * max(0, columns - len(row))
+        clean = [re.sub(r"\s+", " ", cell).strip().replace("|", r"\|") for cell in cells]
+        return "| " + " | ".join(clean) + " |"
+
+    return "\n".join(
+        [render_row(header), render_row(tuple("---" for _ in range(columns)))]
+        + [render_row(row) for row in rows]
+    )
+
+
+def table_to_markdown(table: Any) -> str:
+    """Render one PyMuPDF table using the same formatter as structural chunks."""
+    header, rows, columns, _ = extract_table_data(table)
+    return render_markdown_table(header, rows, columns)
 
 
 def find_table_regions(pdf_document, lines: list[PageLine]) -> list[TableRegion]:
@@ -68,6 +138,7 @@ def find_table_regions(pdf_document, lines: list[PageLine]) -> list[TableRegion]
                 n_cols = int(getattr(table, "col_count", 0) or 0)
             except Exception:  # pragma: no cover
                 continue
+            header, data_rows, n_cols, header_external = extract_table_data(table)
 
             inside = frozenset(
                 line.ordinal
@@ -94,10 +165,14 @@ def find_table_regions(pdf_document, lines: list[PageLine]) -> list[TableRegion]
                     rows=n_rows,
                     cols=n_cols,
                     ordinals=span,
+                    header=header,
+                    data_rows=data_rows,
+                    header_external=header_external,
+                    page_height=float(page.rect.height),
                 )
             )
 
-    return _merge_overlapping(regions)
+    return inherit_continuation_headers(_merge_overlapping(regions))
 
 
 def _merge_overlapping(regions: list[TableRegion]) -> list[TableRegion]:
@@ -128,6 +203,10 @@ def _merge_overlapping(regions: list[TableRegion]) -> list[TableRegion]:
                 min(candidate.ordinals) <= max(current.ordinals) + 1
             )
             if overlaps:
+                richer = max(
+                    (current, candidate),
+                    key=lambda region: (1 + len(region.data_rows)) * region.cols,
+                )
                 # Both operands are contiguous within this page's ordinals, and
                 # they overlap or abut, so their union is contiguous too.
                 current = TableRegion(
@@ -141,6 +220,10 @@ def _merge_overlapping(regions: list[TableRegion]) -> list[TableRegion]:
                     rows=max(current.rows, candidate.rows),
                     cols=max(current.cols, candidate.cols),
                     ordinals=current.ordinals | candidate.ordinals,
+                    header=richer.header,
+                    data_rows=richer.data_rows,
+                    header_external=richer.header_external,
+                    page_height=current.page_height,
                 )
             else:
                 merged.append(current)
@@ -149,6 +232,69 @@ def _merge_overlapping(regions: list[TableRegion]) -> list[TableRegion]:
         merged.append(current)
 
     return merged
+
+
+def _row_signature(row: tuple[str, ...], columns: int) -> tuple[str, ...]:
+    """Classify cells coarsely enough to distinguish headers from body rows."""
+    padded = list(row[:columns]) + [""] * max(0, columns - len(row))
+    signature = []
+    for cell in padded:
+        value = re.sub(r"\s+", " ", cell).strip()
+        has_alpha = any(character.isalpha() for character in value)
+        has_digit = any(character.isdigit() for character in value)
+        if not value:
+            signature.append("empty")
+        elif has_alpha and has_digit:
+            signature.append("mixed")
+        elif has_digit:
+            signature.append("numeric")
+        else:
+            signature.append("text")
+    return tuple(signature)
+
+
+def _looks_like_body_row(row: tuple[str, ...], previous: TableRegion) -> bool:
+    """True when an inferred header has the prior table's body shape, not its header."""
+    candidate = _row_signature(row, previous.cols)
+    header = _row_signature(previous.header, previous.cols)
+    body = {_row_signature(data_row, previous.cols) for data_row in previous.data_rows}
+    return candidate != header and candidate in body
+
+
+def inherit_continuation_headers(regions: list[TableRegion]) -> list[TableRegion]:
+    """Restore the header on a table that flows onto the following page.
+
+    PyMuPDF labels the first data row on a headerless continuation as an internal
+    header. A continuation must match both page-edge geometry and the prior table's
+    body-row shape; this avoids relabeling an unrelated next-page table that happens
+    to have the same width and column count.
+    """
+    restored: list[TableRegion] = []
+    for region in regions:
+        previous = restored[-1] if restored else None
+        continues = bool(
+            previous
+            and region.page == previous.page + 1
+            and region.cols == previous.cols
+            and not region.header_external
+            and region.header != previous.header
+            and _looks_like_body_row(region.header, previous)
+            and abs(region.bbox[0] - previous.bbox[0]) <= 12
+            and abs(region.bbox[2] - previous.bbox[2]) <= 12
+            and previous.page_height > 0
+            and region.page_height > 0
+            and previous.bbox[3] >= previous.page_height * 0.75
+            and region.bbox[1] <= region.page_height * 0.25
+        )
+        if continues and previous is not None:
+            # The inferred "header" is really the continuation's first data row.
+            region = replace(
+                region,
+                header=previous.header,
+                data_rows=(region.header,) + region.data_rows,
+            )
+        restored.append(region)
+    return restored
 
 
 def _contains(
@@ -202,6 +348,20 @@ def markdown_table_blocks(text: str) -> list[tuple[int, int]]:
 
     # A single pipe line is not a table.
     return [(a, b) for a, b in spans if b > a]
+
+
+def replace_markdown_tables(text: str, replacements: list[str]) -> str:
+    """Replace detected pipe tables when they map one-to-one to extracted grids."""
+    spans = markdown_table_blocks(text)
+    if not spans or len(spans) != len(replacements):
+        return text
+
+    lines = text.splitlines()
+    for (start, end), replacement in reversed(list(zip(spans, replacements, strict=True))):
+        lines[start : end + 1] = replacement.splitlines()
+
+    suffix = "\n" if text.endswith("\n") else ""
+    return "\n".join(lines) + suffix
 
 
 def count_markdown_tables(text: str) -> int:

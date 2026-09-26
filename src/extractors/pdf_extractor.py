@@ -131,7 +131,15 @@ class PDFExtractor(BaseExtractor):
         Returns:
             Tuple of (full_text, pages_structure)
         """
-        # Get markdown text with page chunks
+        from ..pdf_structure.tables import (
+            TableRegion,
+            extract_table_data,
+            inherit_continuation_headers,
+            replace_markdown_tables,
+        )
+
+        # Convert first: pymupdf4llm configures PyMuPDF's layout analysis, so cell
+        # extraction must happen afterwards to stay deterministic with structural chunks.
         md_pages = pymupdf4llm.to_markdown(
             file_path,
             page_chunks=True,
@@ -140,11 +148,46 @@ class PDFExtractor(BaseExtractor):
             force_text=True
         )
 
+        # Extract the same cell grids used by structural chunks. Doing this for the
+        # document at once lets headerless page continuations inherit their header.
+        table_regions = []
+        for page_idx in range(len(pdf_document)):
+            page = pdf_document[page_idx]
+            try:
+                found = page.find_tables()
+                for table in found.tables:
+                    header, rows, columns, external = extract_table_data(table)
+                    table_regions.append(
+                        TableRegion(
+                            page=page_idx + 1,
+                            bbox=tuple(float(value) for value in table.bbox),
+                            rows=int(getattr(table, "row_count", 0) or 0),
+                            cols=columns,
+                            ordinals=frozenset(),
+                            header=header,
+                            data_rows=rows,
+                            header_external=external,
+                            page_height=float(page.rect.height),
+                        )
+                    )
+            except Exception as exc:  # pragma: no cover - version differences
+                logger.debug("Could not extract tables on page %s: %s", page_idx + 1, exc)
+
+        replacements_by_page = {}
+        ordered_regions = sorted(
+            table_regions,
+            key=lambda region: (region.page, region.bbox[1], region.bbox[0]),
+        )
+        for region in inherit_continuation_headers(ordered_regions):
+            replacements_by_page.setdefault(region.page, []).append(region.markdown)
+
         pages = []
         text_parts = []
 
         for page_idx, md_page in enumerate(md_pages):
             page_text = md_page.get('text', '')
+            replacements = replacements_by_page.get(page_idx + 1, [])
+            page_text = replace_markdown_tables(page_text, replacements)
             text_parts.append(page_text)
 
             # Build page structure

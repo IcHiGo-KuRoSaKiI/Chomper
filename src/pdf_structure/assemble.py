@@ -114,16 +114,20 @@ class _Unit:
     kind: str
     atomic: bool
     heading_ordinals: frozenset[int] = field(default_factory=frozenset)
+    rendered_text: str | None = None
 
     @property
     def text(self) -> str:
         """Rendered text.
 
-        Tables, formulas and T-accounts are emitted verbatim, because their line
-        breaks and column alignment carry the meaning. Prose is reflowed to undo
-        PDF soft wrapping, with heading lines kept on their own line so they stay
+        Tables use a canonical markdown grid; formulas and T-accounts retain their
+        source line breaks. Prose is reflowed to undo PDF soft wrapping, with heading
+        lines kept on their own line so they stay
         visible as structure rather than dissolving into the paragraph.
         """
+        if self.rendered_text is not None:
+            return self.rendered_text
+
         if self.kind != "prose":
             return "\n".join(l.text for l in self.lines)
 
@@ -166,11 +170,14 @@ def _build_units(
     """
     kind_by_ordinal: dict[int, str] = {}
     group_by_ordinal: dict[int, str] = {}
+    rendered_by_group: dict[str, str] = {}
 
     for index, region in enumerate(tables):
+        group = f"table:{index}"
+        rendered_by_group[group] = region.markdown
         for ordinal in region.ordinals:
             kind_by_ordinal[ordinal] = "table"
-            group_by_ordinal[ordinal] = f"table:{index}"
+            group_by_ordinal[ordinal] = group
 
     for index, region in enumerate(maths):
         for ordinal in region.ordinals:
@@ -194,6 +201,7 @@ def _build_units(
                     kind=kind,
                     atomic=current_group is not None,
                     heading_ordinals=heading_ordinals,
+                    rendered_text=rendered_by_group.get(current_group or ""),
                 )
             )
         current = []

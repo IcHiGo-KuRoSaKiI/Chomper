@@ -46,6 +46,8 @@ from src.pdf_structure.sentences import (  # noqa: E402
     split_sentences,
 )
 from src.pdf_structure.tables import (  # noqa: E402
+    TableRegion,
+    inherit_continuation_headers,
     markdown_table_blocks,
     table_row_count,
 )
@@ -71,6 +73,43 @@ def _truth(fixture_dir: Path, name: str) -> dict:
 
 def _parse(fixture_dir: Path, name: str, **kwargs):
     return parse_structure(fixture_dir / f"{name}.pdf", **kwargs)
+
+
+def _write_reportlab_table(
+    path: Path,
+    rows: list[list[str]],
+    *,
+    long: bool = False,
+) -> None:
+    """Write a ruled table PDF using the regression-test dependency."""
+    pytest.importorskip("reportlab")
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import letter
+    from reportlab.platypus import LongTable, SimpleDocTemplate, Table, TableStyle
+
+    table_type = LongTable if long else Table
+    table = table_type(
+        rows,
+        colWidths=[120] * len(rows[0]),
+        rowHeights=[18] * len(rows),
+        repeatRows=0,
+    )
+    table.setStyle(
+        TableStyle(
+            [
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ]
+        )
+    )
+    SimpleDocTemplate(
+        str(path),
+        pagesize=letter,
+        topMargin=54,
+        bottomMargin=54,
+        leftMargin=54,
+        rightMargin=54,
+    ).build([table])
 
 
 # ---------------------------------------------------------------------------
@@ -408,6 +447,99 @@ class TestTables:
 
     def test_single_pipe_line_is_not_a_table(self):
         assert markdown_table_blocks("| lonely |") == []
+
+    def test_unrelated_next_page_table_keeps_its_own_header(self):
+        first = TableRegion(
+            page=1,
+            bbox=(50, 620, 550, 760),
+            rows=2,
+            cols=2,
+            ordinals=frozenset({1, 2}),
+            header=("First", "Table"),
+            data_rows=(("Alpha", "Beta"),),
+            page_height=800,
+        )
+        second = TableRegion(
+            page=2,
+            bbox=(50, 40, 550, 120),
+            rows=2,
+            cols=2,
+            ordinals=frozenset({3, 4}),
+            header=("Totally", "Different"),
+            data_rows=(("Gamma", "Delta"),),
+            page_height=800,
+        )
+
+        restored = inherit_continuation_headers([first, second])
+        assert restored[1].header == ("Totally", "Different")
+        assert restored[1].data_rows == (("Gamma", "Delta"),)
+
+    def test_pdf_table_chunks_are_canonical_markdown(self, tmp_path):
+        """Chunk and parse paths share a lossless pipe-table representation."""
+        import re
+
+        import chomper
+
+        path = tmp_path / "table_cells.pdf"
+        rows = [
+            ["Name", "Region", "Note", "Amount"],
+            ["Alpha", "North", "A | B\nSecond line", "10"],
+            ["Beta", "", "Empty region", "20"],
+            ["Gamma", "West", "", "30"],
+            ["Delta", "East", "OK", "40"],
+        ]
+        _write_reportlab_table(path, rows)
+
+        expected = "\n".join(
+            [
+                "| Name | Region | Note | Amount |",
+                "| --- | --- | --- | --- |",
+                "| Alpha | North | A \\| B Second line | 10 |",
+                "| Beta |  | Empty region | 20 |",
+                "| Gamma | West |  | 30 |",
+                "| Delta | East | OK | 40 |",
+            ]
+        )
+
+        chunks = chomper.chunk(path, chunk_size=10, overlap=0)
+        table_chunk = next(chunk for chunk in chunks if "| Name |" in chunk.text)
+        assert expected in table_chunk.text
+        assert expected in chomper.parse(path).text
+
+        pipe_rows = [line for line in table_chunk.text.splitlines() if line.startswith("|")]
+        assert len(pipe_rows) == 6
+        assert all(len(re.findall(r"(?<!\\)\|", line)) == 5 for line in pipe_rows)
+
+    def test_two_page_table_repeats_header_for_continuation(self, tmp_path):
+        """A headerless page continuation remains data and gets the original header."""
+        import chomper
+
+        path = tmp_path / "continued_table.pdf"
+        rows = [["Item", "Region", "Amount"]]
+        rows.extend(
+            [f"Item {index:02d}", f"Region {index % 4}", str(index * 10)]
+            for index in range(1, 61)
+        )
+        _write_reportlab_table(path, rows, long=True)
+
+        chunks = chomper.chunk(path, chunk_size=10_000, overlap=0)
+        table_chunk = next(chunk for chunk in chunks if "| Item | Region | Amount |" in chunk.text)
+        spans = markdown_table_blocks(table_chunk.text)
+
+        assert len(spans) == 2
+        assert table_chunk.text.count("| Item | Region | Amount |") == 2
+        assert "| Item 01 | Region 1 | 10 |" in table_chunk.text
+        assert "| Item 60 | Region 0 | 600 |" in table_chunk.text
+
+        parsed = chomper.parse(path).text
+        assert parsed.count("| Item | Region | Amount |") == 2
+        assert "| Item 60 | Region 0 | 600 |" in parsed
+
+        parsed_lines = parsed.splitlines()
+        chunk_lines = table_chunk.text.splitlines()
+        parsed_tables = ["\n".join(parsed_lines[start : end + 1]) for start, end in markdown_table_blocks(parsed)]
+        chunk_tables = ["\n".join(chunk_lines[start : end + 1]) for start, end in spans]
+        assert parsed_tables == chunk_tables
 
 
 # ---------------------------------------------------------------------------
