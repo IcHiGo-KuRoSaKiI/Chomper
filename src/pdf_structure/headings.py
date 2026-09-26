@@ -53,6 +53,17 @@ _NUMBERED = re.compile(r"^(\d+(?:\.\d+)*)[.)]?\s+(\S.*)$")
 _ALL_DIGITS = re.compile(r"^[\d\s.,:%()£$-]+$")
 _MAX_HEADING_WORDS = 20
 
+#: Bold lines that are captions or algorithm steps, not section headings.
+_CAPTION = re.compile(r"^(figure|fig\.|table|algorithm|listing)\s*\d+", re.IGNORECASE)
+_STEP = re.compile(r"^\d+:")
+#: A bold run-in head followed by its paragraph: "Scope. The model ...".
+_RUN_IN = re.compile(r"\S+\s+\S+[^.]*\.\s+[A-Z]")
+#: Below this share of letters among non-space characters a line is maths or code.
+_MIN_LETTER_SHARE = 0.6
+#: Words allowed in a neighbour on the same row before it counts as prose.
+_CELL_WORDS = 6
+_SECTION_NO = re.compile(r"^(?:[A-Z]|\d+)(?:\.\d+)*\.?$")
+
 
 @dataclass(frozen=True)
 class HeadingSpan:
@@ -191,6 +202,53 @@ def _plausible(line: PageLine) -> bool:
     return True
 
 
+def _row_neighbours(lines: list[PageLine]) -> set[int]:
+    """Ordinals of lines that share their row with another short line.
+
+    Bold table headers and author blocks sit side by side on one row; a heading
+    stands alone or beside prose in the other column of a two-column page.
+    """
+    by_page: dict[int, list[PageLine]] = {}
+    for line in lines:
+        by_page.setdefault(line.page, []).append(line)
+    def is_cell(other: PageLine, line: PageLine) -> bool:
+        if other.word_count > _CELL_WORDS:
+            return False
+        # A section number ("3.1", "A.2") just left of its heading is not a cell.
+        numbered = _SECTION_NO.match(other.text.strip())
+        just_left = other.bbox[2] <= line.bbox[0] and line.bbox[0] - other.bbox[2] < 30
+        return not (numbered and just_left)
+
+    crowded: set[int] = set()
+    for page_lines in by_page.values():
+        page_lines.sort(key=lambda l: l.bbox[1])
+        for i, a in enumerate(page_lines):
+            a_h = max(a.bbox[3] - a.bbox[1], 1e-6)
+            for b in page_lines[i + 1 :]:
+                if b.bbox[1] >= a.bbox[3]:
+                    break
+                overlap = min(a.bbox[3], b.bbox[3]) - max(a.bbox[1], b.bbox[1])
+                b_h = max(b.bbox[3] - b.bbox[1], 1e-6)
+                if overlap < 0.5 * min(a_h, b_h):
+                    continue
+                if a.bbox[2] <= b.bbox[0] or b.bbox[2] <= a.bbox[0]:
+                    if is_cell(b, a):
+                        crowded.add(a.ordinal)
+                    if is_cell(a, b):
+                        crowded.add(b.ordinal)
+    return crowded
+
+
+def _bold_heading_shape(line: PageLine) -> bool:
+    """Extra checks for body-size bold lines, the least precise signal."""
+    text = line.text.strip()
+    if _CAPTION.match(text) or _STEP.match(text) or _RUN_IN.search(text):
+        return False
+    chars = [c for c in text if not c.isspace()]
+    letters = sum(1 for c in chars if c.isalpha())
+    return bool(chars) and letters / len(chars) >= _MIN_LETTER_SHARE
+
+
 def detect_headings(
     lines: list[PageLine],
     *,
@@ -244,6 +302,7 @@ def detect_headings(
     bold_level = min(deepest + 1, MAX_LEVEL) if deepest else 1
 
     headings: list[HeadingSpan] = []
+    crowded = _row_neighbours(lines) if enable_bold else set()
 
     for line in lines:
         # Band is deliberately not tested here; see the note in build_tiers.
@@ -267,6 +326,8 @@ def detect_headings(
                 and line.size <= body * size_ratio
                 and line.word_count <= 12
                 and not line.text.rstrip().endswith(".")
+                and line.ordinal not in crowded
+                and _bold_heading_shape(line)
             ):
                 level, signal = bold_level, "bold"
 

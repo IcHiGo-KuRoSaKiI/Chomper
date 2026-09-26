@@ -17,6 +17,8 @@ of 15 chunks ending mid-sentence in measurement.
 
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 
 from .headings import HeadingSpan, heading_path, parent_heading_id
@@ -218,6 +220,10 @@ def _build_units(
     return units
 
 
+#: Characters that close a sentence, allowing trailing quotes or brackets.
+_SENTENCE_END = re.compile(r"[.!?:;][\"'”’)\]]*\s*$")
+
+
 def _subdivide(text: str, max_words: int) -> list[str]:
     """Split oversized prose without ever cutting inside a sentence.
 
@@ -243,6 +249,23 @@ def _subdivide(text: str, max_words: int) -> list[str]:
 
     if not items:
         return []
+
+    # A paragraph that ends without sentence punctuation is a heading or label
+    # ("1.1 Scope"). Cutting after it would orphan it from the text it
+    # introduces, and it is not a sentence end, so glue it to what follows.
+    glued: list[tuple[str, bool]] = []
+    carry = ""
+    for sentence, ends_paragraph in items:
+        if carry:
+            sentence = f"{carry}\n\n{sentence}"
+            carry = ""
+        if ends_paragraph and not _SENTENCE_END.search(sentence):
+            carry = sentence
+            continue
+        glued.append((sentence, ends_paragraph))
+    if carry:
+        glued.append((carry, True))
+    items = glued
 
     pieces: list[str] = []
     buffer: list[str] = []

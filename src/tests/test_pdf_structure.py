@@ -790,6 +790,54 @@ class TestNoise:
         assert len(kept) == 2
 
 
+class TestBoldHeadingFilters:
+    """Body-size bold lines that are not section headings (seen on a real paper)."""
+
+    @staticmethod
+    def _line(ordinal, text, x0, y0, *, bold=True, size=10.0, page=1):
+        from src.pdf_structure.lines import PageLine
+
+        x1 = x0 + 6 * len(text)
+        return PageLine(
+            page=page, ordinal=ordinal, text=text, bbox=(x0, y0, x1, y0 + 10),
+            size=size, font="Times-Bold" if bold else "Times", bold=bold,
+            y_frac=y0 / 842.0, page_height=842.0,
+        )
+
+    def _headings(self, extra):
+        body = [
+            self._line(100 + i, "Body text that runs on as ordinary prose here.",
+                       72, 400 + 12 * i, bold=False)
+            for i in range(30)
+        ]
+        found, _ = detect_headings(extra + body)
+        return {h.text for h in found}
+
+    def test_rejects_cells_authors_captions_and_steps(self):
+        texts = self._headings([
+            self._line(1, "Zehao Jin", 72, 100), self._line(2, "Yaoye Zhu", 250, 100),
+            self._line(3, "Model", 72, 150), self._line(4, "Metric", 200, 150),
+            self._line(5, "Figure 1: Overview of the system", 72, 200),
+            self._line(6, "10: end for", 72, 250),
+            self._line(7, "Wg[Ht[Va], 1˜x⊤", 72, 300),
+            self._line(8, "Scope of work. The model reads", 72, 350),
+        ])
+        assert not texts & {
+            "Zehao Jin", "Yaoye Zhu", "Model", "Metric", "10: end for",
+            "Figure 1: Overview of the system", "Wg[Ht[Va], 1˜x⊤",
+            "Scope of work. The model reads",
+        }
+
+    def test_keeps_numbered_subsection_beside_its_number(self):
+        texts = self._headings([
+            self._line(1, "3.1", 72, 100),
+            self._line(2, "Training Pipeline", 96, 100),
+            self._line(3, "A.2", 72, 150),
+            self._line(4, "Task-Specific Configurations", 96, 150),
+        ])
+        assert {"Training Pipeline", "Task-Specific Configurations"} <= texts
+
+
 # ---------------------------------------------------------------------------
 # regressions on the two original defects
 # ---------------------------------------------------------------------------
