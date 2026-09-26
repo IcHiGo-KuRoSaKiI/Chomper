@@ -331,8 +331,12 @@ class ExcelChunker(BaseChunker):
             if not sheet_info:
                 continue
 
-            # Split sheet text by rows
-            rows = sheet_text.split('\n')
+            # Parse the extractor's Markdown table, dropping its separator row,
+            # then serialize as TSV so headers and columns survive every chunk.
+            rows = [
+                "\t".join(cells)
+                for cells in self._parse_table_rows(sheet_text)
+            ]
             header_row = rows[0] if self.preserve_headers and len(rows) > 0 else None
 
             # Chunk rows
@@ -414,44 +418,82 @@ class ExcelChunker(BaseChunker):
 
         return chunks
 
+    @staticmethod
+    def _parse_table_rows(text: str) -> list[list[str]]:
+        """Parse extractor output in Markdown pipe-table or legacy TSV form."""
+        rows = []
+
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("|") and stripped.endswith("|"):
+                cells = []
+                cell = []
+                escaped = False
+                for char in stripped[1:-1]:
+                    if escaped:
+                        cell.append(char if char == "|" else f"\\{char}")
+                        escaped = False
+                    elif char == "\\":
+                        escaped = True
+                    elif char == "|":
+                        cells.append("".join(cell).strip())
+                        cell = []
+                    else:
+                        cell.append(char)
+                if escaped:
+                    cell.append("\\")
+                cells.append("".join(cell).strip())
+
+                # Markdown's header delimiter is formatting, not an Excel row.
+                if cells and all(
+                    value.strip(":") and set(value.strip(":")) == {"-"}
+                    for value in cells
+                ):
+                    continue
+            else:
+                cells = line.split("\t")
+
+            rows.append(cells)
+
+        return rows
+
     def _extract_table_text(self, sheet_text: str, table: TableRange) -> str:
         """
         Extract text for a specific table from sheet text.
 
         Args:
-            sheet_text: Full sheet text (TSV format)
+            sheet_text: Full sheet text (Markdown table or legacy TSV format)
             table: TableRange object
 
         Returns:
-            Table text
+            Table text in TSV form
         """
-        rows = sheet_text.split('\n')
+        rows = self._parse_table_rows(sheet_text)
 
         # Extract rows for this table (Excel is 1-indexed)
         table_rows = rows[table.start_row - 1:table.end_row]
 
         # Extract columns for this table
         filtered_rows = []
-        for row_text in table_rows:
-            cells = row_text.split('\t')
+        for cells in table_rows:
             # Excel columns are 1-indexed
             table_cells = cells[table.start_col - 1:table.end_col]
-            filtered_rows.append('\t'.join(table_cells))
+            filtered_rows.append("\t".join(table_cells))
 
-        return '\n'.join(filtered_rows)
+        return "\n".join(filtered_rows)
 
     def _convert_to_html_table(self, text: str, sheet_info: SheetInfo | None) -> str:
         """
-        Convert TSV text to HTML table format.
+        Convert Markdown table or TSV text to HTML table format.
 
         Args:
-            text: TSV text
+            text: Markdown table or TSV text
             sheet_info: Sheet information
 
         Returns:
             HTML table string
         """
-        rows = text.split('\n')
+        rows = self._parse_table_rows(text)
         if not rows:
             return text
 
@@ -459,7 +501,7 @@ class ExcelChunker(BaseChunker):
 
         # First row as header
         if sheet_info and sheet_info.tables and sheet_info.tables[0].has_headers:
-            header_cells = rows[0].split('\t')
+            header_cells = rows[0]
             html_parts.append('  <thead>')
             html_parts.append('    <tr>')
             for cell in header_cells:
@@ -472,8 +514,7 @@ class ExcelChunker(BaseChunker):
 
         # Data rows
         html_parts.append('  <tbody>')
-        for row_text in data_rows:
-            cells = row_text.split('\t')
+        for cells in data_rows:
             html_parts.append('    <tr>')
             for cell in cells:
                 html_parts.append(f'      <td>{cell}</td>')
@@ -489,13 +530,13 @@ class ExcelChunker(BaseChunker):
         Convert table text to HTML.
 
         Args:
-            table_text: TSV table text
+            table_text: Markdown table or TSV table text
             table: TableRange object
 
         Returns:
             HTML string
         """
-        rows = table_text.split('\n')
+        rows = self._parse_table_rows(table_text)
         if not rows:
             return table_text
 
@@ -503,7 +544,7 @@ class ExcelChunker(BaseChunker):
 
         # Header row
         if table.has_headers and len(rows) > 0:
-            header_cells = rows[0].split('\t')
+            header_cells = rows[0]
             html_parts.append('  <thead>')
             html_parts.append('    <tr>')
             for cell in header_cells:
@@ -516,8 +557,7 @@ class ExcelChunker(BaseChunker):
 
         # Data rows
         html_parts.append('  <tbody>')
-        for row_text in data_rows:
-            cells = row_text.split('\t')
+        for cells in data_rows:
             html_parts.append('    <tr>')
             for cell in cells:
                 html_parts.append(f'      <td>{cell}</td>')

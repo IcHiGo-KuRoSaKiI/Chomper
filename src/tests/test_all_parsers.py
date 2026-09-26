@@ -870,6 +870,44 @@ def test_excel_chunkers():
         results.add_fail("ExcelChunker - auto strategy", str(e))
 
 
+def test_excel_chunker_preserves_markdown_rows_and_columns(tmp_path):
+    """Excel markdown emitted by the extractor remains tabular when chunked."""
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    first = workbook.active
+    first.title = "Inventory"
+    first.append(["Product", "Quantity"])
+    first.append(["Widget", 2])
+
+    second = workbook.create_sheet("Prices")
+    second.append(["Product", "Price"])
+    second.append(["Gadget", 19.5])
+
+    path = tmp_path / "workbook.xlsx"
+    workbook.save(path)
+    workbook.close()
+
+    raw_doc = ExcelExtractor().extract(str(path))
+    chunks = ExcelChunker(strategy="by_sheet", convert_to_html=True).chunk(raw_doc)
+
+    assert len(chunks) == 2
+    assert chunks[0].text.count("<tr>") == 2
+    assert "<td>Widget</td>" in chunks[0].text
+    assert "<td>2</td>" in chunks[0].text
+    assert chunks[1].text.count("<tr>") == 2
+    assert "<td>Gadget</td>" in chunks[1].text
+    assert "<td>19.5</td>" in chunks[1].text
+
+    row_chunks = ExcelChunker(
+        strategy="by_rows",
+        chunk_size=1,
+        convert_to_html=False,
+    ).chunk(raw_doc)
+    assert row_chunks[0].text.splitlines() == ["Product\tQuantity", "Widget\t2"]
+    assert all("---" not in chunk.text for chunk in row_chunks)
+
+
 def test_csv_extractors():
     """Test CSV extractors."""
     print("\n" + "=" * 70)
