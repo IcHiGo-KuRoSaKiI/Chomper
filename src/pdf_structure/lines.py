@@ -48,7 +48,7 @@ class PageLine:
     """Font name of the dominant span."""
 
     bold: bool
-    """True when the dominant font name advertises a bold weight."""
+    """True when the dominant span's flags or font name advertise bold weight."""
 
     y_frac: float
     """bbox[1] divided by page height. Used for band tests."""
@@ -82,9 +82,11 @@ class PageLine:
         }
 
 
-def _is_bold(font_name: str) -> bool:
+def _is_bold(font_name: str, flags: int = 0) -> bool:
+    """Return whether a PyMuPDF span advertises a bold or medium weight."""
     lowered = font_name.lower()
-    return "bold" in lowered or "black" in lowered or "heavy" in lowered
+    weight_markers = ("bold", "semibold", "demi", "medium", "heavy", "black", "-medi")
+    return bool(flags & 2**4) or any(marker in lowered for marker in weight_markers)
 
 
 def extract_lines(pdf_document: Any) -> list[PageLine]:
@@ -130,7 +132,7 @@ def extract_lines(pdf_document: Any) -> list[PageLine]:
                         bbox=bbox,  # type: ignore[arg-type]
                         size=size,
                         font=font,
-                        bold=_is_bold(font),
+                        bold=_is_bold(font, int(dominant.get("flags", 0))),
                         y_frac=bbox[1] / height,
                         page_height=height,
                     )

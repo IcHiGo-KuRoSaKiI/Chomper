@@ -78,6 +78,22 @@ def _parse(fixture_dir: Path, name: str, **kwargs):
 # ---------------------------------------------------------------------------
 
 class TestHeadings:
+    def test_bold_detection_uses_span_flags_and_weight_names(self):
+        from src.pdf_structure.lines import _is_bold
+
+        assert _is_bold("Times-Roman", 2**4)
+        for font_name in (
+            "Example-Semibold",
+            "Example-SemiBold",
+            "Example-Demi",
+            "Example-Medium",
+            "Example-Heavy",
+            "Example-Black",
+            "NimbusRomNo9L-Medi",
+        ):
+            assert _is_bold(font_name, 0), font_name
+        assert not _is_bold("Times-Roman", 0)
+
     def test_clean_hierarchy_detected(self, fixture_dir):
         result = _parse(fixture_dir, "clean_headings")
         assert result.headings, "no headings detected in the clean fixture"
