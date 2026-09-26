@@ -39,6 +39,20 @@ class CodeChunker(BaseChunker):
         """
         super().__init__(target_size, overlap, preserve_context)
 
+    def _next_start(self, start: int, end: int, text_length: int) -> int:
+        """Advance after a split while retaining only a safe amount of overlap.
+
+        The final chunk must advance directly to EOF. For earlier chunks, overlap
+        is capped below the actual chunk length so even a line-boundary-shortened
+        chunk always makes at least one character of forward progress.
+        """
+        if end >= text_length:
+            return text_length
+
+        chunk_length = end - start
+        safe_overlap = min(max(self.overlap, 0), max(chunk_length - 1, 0))
+        return max(start + 1, end - safe_overlap)
+
     def chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """
         Chunk code document.
@@ -204,7 +218,7 @@ class CodeChunker(BaseChunker):
             ))
 
             part_num += 1
-            start = end - self.overlap if self.overlap > 0 else end
+            start = self._next_start(start, end, len(func_text))
 
         return chunks
 
@@ -281,7 +295,7 @@ class CodeChunker(BaseChunker):
             ))
 
             part_num += 1
-            start = end - self.overlap if self.overlap > 0 else end
+            start = self._next_start(start, end, len(cls_text))
 
         return chunks
 
@@ -324,6 +338,6 @@ class CodeChunker(BaseChunker):
             chunks.append(chunk)
 
             chunk_id += 1
-            start = end - self.overlap if self.overlap > 0 else end
+            start = self._next_start(start, end, len(content))
 
         return chunks
