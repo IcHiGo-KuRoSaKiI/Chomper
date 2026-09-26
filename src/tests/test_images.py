@@ -87,6 +87,27 @@ def test_pdf_images_reach_every_entry_point(pdf_path: Path):
     assert len(_mcp_images(pdf_path)) == 3
 
 
+@pytest.fixture
+def image_only_pdf_path(tmp_path: Path) -> Path:
+    """A scanned-style PDF with an image but no text layer."""
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_image(page.rect, stream=_png(600, 800, "navy"))
+    path = tmp_path / "scan.pdf"
+    document.save(path)
+    document.close()
+    return path
+
+
+def test_image_only_pdf_degrades_gracefully(image_only_pdf_path: Path):
+    parsed = chomper.parse(str(image_only_pdf_path))
+
+    assert parsed.text == ""
+    assert parsed.metadata["no_text_layer"] is True
+    assert "OCR" in parsed.metadata["warning"]
+    assert chomper.chunk(str(image_only_pdf_path)) == []
+
+
 def test_pdf_repeated_logo_is_deduped_but_page_filter_keeps_it(pdf_path: Path):
     parsed = chomper.parse(str(pdf_path), include_images=True).images
     logo = next(img for img in parsed if img["width"] == 120)

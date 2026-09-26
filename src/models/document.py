@@ -23,8 +23,8 @@ class RawDocument:
     structure: dict[str, Any] | None = None  # Pages, sections, etc.
 
     def __post_init__(self):
-        """Validate raw document."""
-        if not self.text:
+        """Validate raw document, allowing explicitly marked textless files."""
+        if not self.text and not self.metadata.get("no_text_layer"):
             raise ValueError("RawDocument must have text content")
 
 

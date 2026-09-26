@@ -95,6 +95,10 @@ class PDFExtractor(BaseExtractor):
         # Get metadata
         metadata = self._get_basic_metadata(file_path)
         metadata.update(self._extract_pdf_metadata(pdf_document))
+        if not full_text.strip():
+            warning = "No text layer detected; use OCR to extract text from this PDF."
+            metadata.update({"no_text_layer": True, "warning": warning})
+            logger.warning("%s: %s", file_path, warning)
 
         pdf_document.close()
 
