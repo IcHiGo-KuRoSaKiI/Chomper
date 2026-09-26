@@ -94,6 +94,42 @@ class TestHeadings:
             assert _is_bold(font_name, 0), font_name
         assert not _is_bold("Times-Roman", 0)
 
+    def test_short_pdf_keeps_unnumbered_h2_boundaries(self, tmp_path):
+        document = fitz.open()
+
+        sections = (
+            ("Overview", ("Scope", "Details")),
+            ("Appendix", ("References",)),
+        )
+        body_index = 0
+        for h1, h2s in sections:
+            page = document.new_page()
+            y = 72
+            page.insert_text((72, y), h1, fontsize=18)
+            y += 30
+            for h2 in h2s:
+                page.insert_text((72, y), h2, fontsize=14)
+                y += 24
+                for _ in range(4):
+                    body_index += 1
+                    page.insert_text(
+                        (72, y),
+                        f"Body line {body_index} explains this short section.",
+                        fontsize=11,
+                    )
+                    y += 18
+
+        path = tmp_path / "short-headings.pdf"
+        document.save(path)
+        document.close()
+
+        result = parse_structure(path)
+        levels = {heading.text: heading.level for heading in result.headings}
+        expected_h2s = {"Scope", "Details", "References"}
+
+        assert all(levels[text] == 2 for text in expected_h2s)
+        assert expected_h2s <= {block.section_name for block in result.blocks}
+
     def test_clean_hierarchy_detected(self, fixture_dir):
         result = _parse(fixture_dir, "clean_headings")
         assert result.headings, "no headings detected in the clean fixture"

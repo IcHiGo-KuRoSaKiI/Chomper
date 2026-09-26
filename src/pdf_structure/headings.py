@@ -133,11 +133,22 @@ def build_tiers(
         else:
             merged[size] = counts[size]
 
+    # A fixed ten-line floor works for long reports but demotes every secondary
+    # size in short documents. Scale it to 5% of body lines, with a two-line
+    # minimum so repeated, clearly oversized standalone lines can form a tier.
+    body_line_count = sum(
+        1 for line in lines if abs(line.size - body) <= SIZE_EPSILON
+    )
+    adaptive_min = min(
+        min_tier_lines,
+        max(2, (body_line_count + 19) // 20),
+    )
+
     # Rare sizes are one-offs, not a heading level of their own.
     title_sizes = sorted(
-        (s for s, n in merged.items() if n < min_tier_lines), reverse=True
+        (s for s, n in merged.items() if n < adaptive_min), reverse=True
     )
-    keep = {s: n for s, n in merged.items() if n >= min_tier_lines}
+    keep = {s: n for s, n in merged.items() if n >= adaptive_min}
     if not keep:
         # Everything is rare: treat the largest as the single heading tier so a
         # short document still gets structure.
