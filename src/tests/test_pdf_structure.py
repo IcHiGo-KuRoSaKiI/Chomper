@@ -50,6 +50,7 @@ from src.pdf_structure.tables import (  # noqa: E402
     inherit_continuation_headers,
     markdown_table_blocks,
     table_row_count,
+    table_to_markdown,
 )
 from src.tests.fixtures.make_pdf_fixtures import FIXTURES  # noqa: E402
 
@@ -537,9 +538,70 @@ class TestTables:
 
         parsed_lines = parsed.splitlines()
         chunk_lines = table_chunk.text.splitlines()
-        parsed_tables = ["\n".join(parsed_lines[start : end + 1]) for start, end in markdown_table_blocks(parsed)]
-        chunk_tables = ["\n".join(chunk_lines[start : end + 1]) for start, end in spans]
+        parsed_tables = [
+            "\n".join(parsed_lines[start : end + 1])
+            for start, end in markdown_table_blocks(parsed)
+        ]
+        chunk_tables = [
+            "\n".join(chunk_lines[start : end + 1]) for start, end in spans
+        ]
         assert parsed_tables == chunk_tables
+
+    def test_structural_table_cells_match_pymupdf_verbatim(self, tmp_path):
+        """Quad settings and sentence handling must not alter extracted cells."""
+        path = tmp_path / "verbatim_table_cells.pdf"
+        rows = [
+            ["Multi word header", "Metric value", "Company note"],
+            ["Active borrowers", "1.42m", "+12.7%"],
+            ["Gross portfolio", "Rs. 1,170 cr.", "96.8%"],
+            ["Branch count", "4,337", "e.g. Ltd."],
+        ]
+        _write_reportlab_table(path, rows)
+
+        # The legacy pymupdf4llm backend changes this process-global PyMuPDF
+        # setting at import time. Recreate that state so this regression remains
+        # deterministic regardless of test order.
+        fitz.TOOLS.unset_quad_corrections(True)
+        result = parse_structure(path, max_words=10)
+
+        fitz.TOOLS.unset_quad_corrections(False)
+        with fitz.open(path) as document:
+            extracted = document[0].find_tables().tables[0]
+            assert extracted.extract() == rows
+            expected = table_to_markdown(extracted)
+
+        table_blocks = [block.text for block in result.blocks if block.contains_table]
+        assert any(expected in text for text in table_blocks)
+
+    def test_all_northwind_table_cells_match_pymupdf_verbatim(self):
+        """Every real report table row survives structural chunking unchanged."""
+        from collections import Counter
+
+        path = Path(
+            "/Users/ichigo/GitHub/chomper-demo/samples/docs/"
+            "northwind-annual-report-2025.pdf"
+        )
+        if not path.exists():
+            pytest.skip("Northwind annual report sample is not available")
+
+        fitz.TOOLS.unset_quad_corrections(True)
+        result = parse_structure(path, max_words=600)
+
+        fitz.TOOLS.unset_quad_corrections(False)
+        expected_rows: list[str] = []
+        with fitz.open(path) as document:
+            for page in document:
+                for table in page.find_tables().tables:
+                    rendered = table_to_markdown(table).splitlines()
+                    expected_rows.extend(rendered[:1] + rendered[2:])
+
+        emitted_rows = [
+            line
+            for block in result.blocks
+            for line in block.text.splitlines()
+            if line.startswith("|") and "---" not in line
+        ]
+        assert Counter(emitted_rows) == Counter(expected_rows)
 
 
 # ---------------------------------------------------------------------------
@@ -578,6 +640,19 @@ class TestFormulas:
             assert len(holders) == 1, (
                 f"{region.kind} on page {region.page} split across {len(holders)} blocks"
             )
+
+    def test_math_regions_emitted_verbatim(self, fixture_dir):
+        """Formula and T-account text bypasses prose reflow and sentence masking."""
+        result = _parse(fixture_dir, "formulas", max_words=20)
+        for region in result.maths:
+            source = "\n".join(
+                line.text for line in result.lines if line.ordinal in region.ordinals
+            )
+            holders = [
+                block for block in result.blocks if region.ordinals & set(block.ordinals)
+            ]
+            assert len(holders) == 1
+            assert source in holders[0].text
 
     def test_no_latex_fabricated(self, fixture_dir):
         """We preserve verbatim; we do not invent LaTeX."""

@@ -175,6 +175,13 @@ def parse_structure(
     if not path.exists():
         raise FileNotFoundError(f"File not found: {path}")
 
+    # The legacy pymupdf4llm backend disables quad corrections process-wide when
+    # imported. With corrections disabled, PyMuPDF's table finder can turn
+    # ``1.42m`` into ``142m\n.`` and remove spaces between words. Structural
+    # parsing needs the corrected glyph geometry for all atomic regions, including
+    # tables and formulae, so restore PyMuPDF's accurate mode before reading lines.
+    fitz.TOOLS.unset_quad_corrections(False)
+
     document = fitz.open(str(path))
     try:
         raw_lines = extract_lines(document)
