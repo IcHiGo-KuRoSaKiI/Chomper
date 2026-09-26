@@ -242,6 +242,21 @@ def test_formatters():
     assert "relationships" in result
     print("  ✅ Neo4jFormatter")
 
+
+def test_runtime_dependencies_have_compatible_upper_bounds():
+    """Fresh installs must not resolve incompatible MCP or PDF major versions."""
+    root = Path(__file__).resolve().parents[2]
+    pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
+    requirements = (root / "requirements.txt").read_text(encoding="utf-8")
+
+    assert pyproject.count('"mcp>=1.25,<2"') == 2
+    assert '"pymupdf>=1.26.7,<1.27"' in pyproject
+    assert '"pymupdf4llm>=0.2.9,<0.3"' in pyproject
+    assert "mcp>=1.25,<2" in requirements
+    assert "pymupdf>=1.26.7,<1.27" in requirements
+    assert "pymupdf4llm>=0.2.9,<0.3" in requirements
+
+
 def main():
     """Run all tests."""
     try:

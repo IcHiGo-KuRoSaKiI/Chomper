@@ -7,7 +7,7 @@
 # For parser library dependencies, see parsers/requirements.txt
 
 # MCP SDK (Model Context Protocol)
-mcp>=1.0.0
+mcp>=1.25,<2
 
 # Parser library dependencies (core)
 dataclasses-json>=0.6.0
@@ -16,8 +16,8 @@ nltk>=3.8.0
 chardet>=5.2.0
 
 # PDF support
-pymupdf>=1.23.0
-pymupdf4llm>=0.0.5  # LLM-optimized Markdown output with table detection
+pymupdf>=1.26.7,<1.27
+pymupdf4llm>=0.2.9,<0.3  # LLM-optimized Markdown output with table detection
 pysbd>=0.3.4          # abbreviation-safe sentence boundaries (structural PDF chunking)
 pillow>=10.1.0
 
