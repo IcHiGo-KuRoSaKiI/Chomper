@@ -15,11 +15,15 @@ Two independent views, because each catches what the other misses:
 
 from __future__ import annotations
 
+import logging
 import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
 from .lines import PageLine
+
+logger = logging.getLogger(__name__)
 
 _PIPE_ROW = re.compile(r"^\s*\|.*\|\s*$")
 _SEPARATOR_ROW = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
@@ -94,6 +98,214 @@ def _cells_from_words(table: Any, rows: Any) -> tuple[tuple[str, ...], ...] | No
             return None
         out.append(tuple("" if cell is None else _cell_text(words, cell) for cell in cells))
     return tuple(out)
+
+
+#: A cell that says yes/no/optional with a mark, maybe with a footnote number.
+_MARK_CELL = re.compile(r"^[●○◐◑◒✓✔✗✘✕×+•■□☑☒✚–—-](?:\s*\d{1,2}(?:,\d{1,2})*)?$")
+
+Grid = list[list[str]]
+CellBoxes = list[list["tuple[float, float, float, float] | None"]]
+
+
+def _is_mark_cell(text: str) -> bool:
+    return bool(_MARK_CELL.match(text.strip()))
+
+
+def is_mark_matrix(grid: Sequence[Sequence[str]], *, min_share: float = 0.6) -> bool:
+    """True when the value cells of ``grid`` are mostly marks (●, ✓, ✗, +).
+
+    Also true when the model merged mark columns: a cell holding several marks
+    (``● ●``) counts as a mark cell.
+    """
+    values = [c.strip() for row in grid for c in row[1:] if c and c.strip()]
+    if len(values) < 4:
+        return False
+    marks = sum(1 for c in values if all(_is_mark_cell(t) for t in c.split()))
+    return marks >= min_share * len(values)
+
+
+def _overlap_1d(a0: float, a1: float, b0: float, b1: float) -> float:
+    return max(0.0, min(a1, b1) - max(a0, b0))
+
+
+def _area(r: Sequence[float]) -> float:
+    return max(0.0, r[2] - r[0]) * max(0.0, r[3] - r[1])
+
+
+def _intersection(a: Sequence[float], b: Sequence[float]) -> float:
+    return _area((max(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3])))
+
+
+#: Marks counted to check none is lost; "+" and "•" also occur in prose.
+_MARK_CHARS = frozenset("●○◐◑◒✓✔✗✘✕×■□☑☒✚")
+
+
+def _mark_count(texts: Any) -> int:
+    """Mark glyphs in a grid (or any nesting of strings)."""
+    if isinstance(texts, str):
+        return sum(ch in _MARK_CHARS for ch in texts)
+    return sum(_mark_count(t) for t in texts if t)
+
+
+def _has_merged_marks(grid: Sequence[Sequence[str]]) -> bool:
+    """A cell holding several separate marks (``● ●``): two columns merged into one."""
+    return any(
+        len(tokens) >= 2 and all(_is_mark_cell(t) for t in tokens)
+        for row in grid
+        for tokens in ((c or "").split() for c in row[1:])
+    )
+
+
+def _centre_in(word: Sequence[Any], box: Sequence[float]) -> bool:
+    cx, cy = (word[0] + word[2]) / 2, (word[1] + word[3]) / 2
+    return box[0] <= cx <= box[2] and box[1] <= cy <= box[3]
+
+
+MarkRecovery = Callable[[Any, CellBoxes, Grid], Grid]
+
+
+@dataclass(frozen=True)
+class RuledPiece:
+    """One piece of a layout table rebuilt from ruled grids: a grid, or a line of text."""
+
+    y: float
+    cells: CellBoxes | None = None
+    grid: Grid | None = None
+    text: str = ""
+    block: int = -1
+
+
+def ruled_grids_for_sparse_matrix(
+    page: Any,
+    bbox: Sequence[float],
+    grid: Sequence[Sequence[str]],
+    recover: MarkRecovery | None = None,
+) -> list[RuledPiece] | None:
+    """The ruled ``find_tables`` grids to use instead of a layout-model grid, or ``None``.
+
+    The layout model places columns from where text is. In a sparse feature
+    matrix (Microsoft 365 plan grids: 21 plan columns, most cells empty or one
+    ●) whole columns hold no text, so the model merges them: a plan's dot lands
+    in its neighbour's column, or two dots share a cell (``● ●``). The ruled
+    grids that ``find_tables`` reads from the drawn lines keep every column.
+    One layout table often spans several ruled sections, with section titles,
+    legends and footnotes between them.
+
+    Preferring ``find_tables`` wherever it overlaps a layout table costs table
+    adjacency F1 on ICDAR-2013 + SciTSR, so the ruled grids are used only when
+    all of these hold:
+
+    - the layout grid is a mark matrix (:func:`is_mark_matrix`);
+    - line-based grids (not guided by the layout model) lie inside the layout
+      table's box and hold at least half of its words;
+    - each has 3+ columns and sparse value cells (>= 90% empty or one mark);
+    - the layout grid shows merged columns: a ruled grid has more columns, or
+      a layout cell holds several marks;
+    - no mark is lost or gained: the ruled grids plus the text between them
+      hold exactly as many mark glyphs as the layout grid;
+    - the ruled cells pull in almost nothing from outside the box (<= 5% of
+      their words).
+
+    Returns the grids and the lines of text between them (words in the box that
+    no ruled cell holds), in reading order from the top. Cell text comes from
+    the page's words (``Table.extract()`` is corrupted once ``pymupdf.layout``
+    is imported); ``recover`` (mark recovery) runs on each ruled grid first.
+    """
+    if not is_mark_matrix(grid):
+        return None
+    try:
+        found = page.find_tables(strategy="lines", use_layout=False).tables
+    except Exception:  # pragma: no cover - PyMuPDF version differences
+        return None
+    # Ruled grids in the layout table's rows; they may be wider (empty columns
+    # carry no text for the model's box to hug).
+    tables = [
+        t for t in found
+        if _overlap_1d(bbox[1], bbox[3], t.bbox[1], t.bbox[3]) >= 0.8 * (t.bbox[3] - t.bbox[1])
+        and _overlap_1d(bbox[0], bbox[2], t.bbox[0], t.bbox[2]) >= 0.5 * (t.bbox[2] - t.bbox[0])
+        and t.col_count >= 3
+    ]
+    if not tables:
+        logger.debug("sparse matrix p%s: no ruled grid in %s", page.number + 1, bbox)
+        return None
+    layout_cols = max((len(row) for row in grid), default=0)
+    if max(t.col_count for t in tables) <= layout_cols and not _has_merged_marks(grid):
+        logger.debug("sparse matrix p%s: no merged columns", page.number + 1)
+        return None
+
+    words = _page_words(page)
+    in_box = [w for w in words if _centre_in(w, bbox)]
+    pieces: list[RuledPiece] = []
+    held: set[int] = set()
+    pulled_in = total = 0
+    for table in tables:
+        texts = _cells_from_words(table, table.rows)
+        if texts is None:
+            return None
+        values = [cell for row in texts for cell in row[1:]]
+        if sum(1 for c in values if not c.strip() or _is_mark_cell(c)) < 0.9 * len(values):
+            logger.debug("sparse matrix p%s: ruled grid %s not sparse", page.number + 1, table.bbox)
+            return None
+        boxes: CellBoxes = [
+            [None if c is None else (float(c[0]), float(c[1]), float(c[2]), float(c[3]))
+             for c in row.cells]
+            for row in table.rows
+        ]
+        ruled = [list(row) for row in texts]
+        if recover is not None:
+            ruled = [["" if c is None else str(c) for c in row] for row in recover(page, boxes, ruled)]
+        flat = [b for row in boxes for b in row if b is not None]
+        for index, word in enumerate(words):
+            if any(_centre_in(word, b) for b in flat):
+                held.add(index)
+                total += 1
+                pulled_in += not _centre_in(word, bbox)
+        pieces.append(RuledPiece(y=float(table.bbox[1]), cells=boxes, grid=ruled))
+    if total < 0.5 * len(in_box) or pulled_in > 0.05 * max(1, total):
+        logger.debug(
+            "sparse matrix p%s: ruled cells hold %d of %d words, %d from outside",
+            page.number + 1, total, len(in_box), pulled_in,
+        )
+        return None
+
+    # Words in the box no ruled cell holds: section titles, legends, footnotes.
+    lines: dict[tuple[int, int], list[tuple[Any, ...]]] = {}
+    for index, word in enumerate(words):
+        if index not in held and _centre_in(word, bbox):
+            lines.setdefault((word[5], word[6]), []).append(word)
+    leftover = [
+        RuledPiece(
+            y=min(w[1] for w in ws),
+            text=" ".join(w[4] for w in sorted(ws, key=lambda w: w[0])),
+            block=int(key[0]),
+        )
+        for key, ws in lines.items()
+    ]
+    marks = sum(_mark_count(p.grid) for p in pieces) + _mark_count([p.text for p in leftover])
+    if marks != _mark_count(grid):
+        logger.debug("sparse matrix p%s: %d marks vs %d", page.number + 1, marks, _mark_count(grid))
+        return None
+    return sorted(pieces + leftover, key=lambda p: p.y)
+
+
+def render_ruled_pieces(pieces: Sequence[RuledPiece]) -> str:
+    """Markdown for :func:`ruled_grids_for_sparse_matrix` output: tables and the
+    text between them, consecutive lines of one text block joined."""
+    parts: list[str] = []
+    last_block: int | None = None
+    for piece in pieces:
+        if piece.grid is None:
+            if last_block == piece.block and parts:
+                parts[-1] += " " + piece.text
+            else:
+                parts.append(piece.text)
+            last_block = piece.block
+            continue
+        last_block = None
+        rows = [tuple(row) for row in piece.grid]
+        columns = max((len(row) for row in rows), default=0)
+        parts.append(render_markdown_table(rows[0], tuple(rows[1:]), columns))
+    return "\n\n".join(parts)
 
 
 def extract_table_data(
