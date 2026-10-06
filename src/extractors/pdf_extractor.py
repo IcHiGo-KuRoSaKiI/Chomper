@@ -295,7 +295,7 @@ class PDFExtractor(BaseExtractor):
         Raster images plus vector-drawn figures on one page, captioned, in
         reading order, with ids ``p<page>-<n>``.
         """
-        from ..pdf_structure.figures import find_caption, find_vector_figures
+        from ..pdf_structure.figures import find_caption, find_vector_figures, share_captions
 
         page_no = page.number + 1
         raster_boxes = [
@@ -322,11 +322,20 @@ class PDFExtractor(BaseExtractor):
         figures = sorted(
             rasters + vectors, key=lambda r: (round(r["position"]["y0"]), r["position"]["x0"])
         )
-        for n, figure in enumerate(figures, start=1):
+        rects = [
+            (f["position"]["x0"], f["position"]["y0"], f["position"]["x1"], f["position"]["y1"])
+            for f in figures
+        ]
+        captions = share_captions(
+            rects,
+            [
+                find_caption(rect, lines, others=rects[:i] + rects[i + 1:])
+                for i, rect in enumerate(rects)
+            ],
+        )
+        for n, (figure, caption) in enumerate(zip(figures, captions, strict=True), start=1):
             figure["id"] = f"p{page_no}-{n}"
             figure.setdefault("kind", "raster")
-            pos = figure["position"]
-            caption = find_caption((pos["x0"], pos["y0"], pos["x1"], pos["y1"]), lines)
             if caption is not None:
                 figure["alt"] = caption.text
                 figure["_caption"] = caption

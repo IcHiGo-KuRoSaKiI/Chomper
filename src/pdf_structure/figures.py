@@ -156,28 +156,55 @@ def _with_labels(
     return (x0, y0, x1, y1)
 
 
-def find_caption(rect: Sequence[float], lines: Sequence[_Line]) -> Caption | None:
-    """The "Figure N ..." caption directly below (preferred) or above ``rect``."""
+def _inside(line: _Line, rect: Sequence[float]) -> bool:
+    cx = (line.bbox[0] + line.bbox[2]) / 2
+    cy = (line.bbox[1] + line.bbox[3]) / 2
+    return rect[0] <= cx <= rect[2] and rect[1] <= cy <= rect[3]
+
+
+def find_caption(
+    rect: Sequence[float],
+    lines: Sequence[_Line],
+    others: Sequence[Sequence[float]] = (),
+) -> Caption | None:
+    """
+    The "Figure N ..." caption belonging to the figure at ``rect``.
+
+    Preference: a caption printed inside the figure's own frame near its top or
+    bottom edge (report-style boxes with a title bar), then the nearest caption
+    just below, then just above. A caption inside a *different* figure (``others``)
+    is never taken.
+    """
     x0, y0, x1, y1 = rect
-    best: tuple[float, int, bool] | None = None
+    edge = max(30.0, 0.2 * (y1 - y0))
+    best: tuple[int, float, int, bool] | None = None  # (rank, gap, index, below)
     for index, line in enumerate(lines):
         lx0, ly0, lx1, ly1 = line.bbox
         if lx1 <= x0 or lx0 >= x1:
             continue
         if not _CAPTION.match(line.text.strip()):
             continue
-        if y1 - 2 <= ly0 <= y1 + _CAPTION_GAP:
-            gap, below = ly0 - y1, True
+        if any(_inside(line, other) for other in others):
+            continue
+        if _inside(line, rect):
+            if ly0 - y0 <= edge:
+                candidate = (0, ly0 - y0, index, False)
+            elif y1 - ly1 <= edge:
+                candidate = (0, y1 - ly1, index, True)
+            else:
+                continue
+        elif y1 - 2 <= ly0 <= y1 + _CAPTION_GAP:
+            candidate = (1, ly0 - y1, index, True)
         elif y0 - _CAPTION_GAP <= ly1 <= y0 + 2:
-            gap, below = y0 - ly1 + 0.5, False  # tie goes to the caption below
+            candidate = (1, y0 - ly1 + 0.5, index, False)  # ties go to the caption below
         else:
             continue
-        if best is None or gap < best[0]:
-            best = (gap, index, below)
+        if best is None or candidate[:2] < best[:2]:
+            best = candidate
     if best is None:
         return None
 
-    _, index, below = best
+    _, _, index, below = best
     first = lines[index]
     parts = [first.text.strip()]
     previous = first
@@ -190,6 +217,31 @@ def find_caption(rect: Sequence[float], lines: Sequence[_Line]) -> Caption | Non
         parts.append(line.text.strip())
         previous = line
     return Caption(text=" ".join(parts), first_line=first.text.strip(), below=below)
+
+
+def share_captions(
+    rects: Sequence[Sequence[float]],
+    captions: list[Caption | None],
+) -> list[Caption | None]:
+    """
+    Give uncaptioned panels the caption of a captioned figure beside them.
+
+    "Figure 2: (left) ... (right) ..." sits under one of two side-by-side
+    images; the other one is part of the same figure.
+    """
+    shared = list(captions)
+    for i, rect in enumerate(rects):
+        if shared[i] is not None:
+            continue
+        for j, other in enumerate(rects):
+            if captions[j] is None or i == j:
+                continue
+            overlap = min(rect[3], other[3]) - max(rect[1], other[1])
+            smaller = min(rect[3] - rect[1], other[3] - other[1])
+            if smaller > 0 and overlap >= 0.5 * smaller:
+                shared[i] = captions[j]
+                break
+    return shared
 
 
 def _norm(text: str) -> str:
