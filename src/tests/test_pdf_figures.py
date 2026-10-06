@@ -143,3 +143,20 @@ def test_vector_figures_can_be_turned_off(chart_pdf: Path):
     raw = PDFExtractor(extract_vector_figures=False).extract(str(chart_pdf))
     assert raw.structure["images"] == []
     assert "image:" not in raw.text
+
+
+def test_pdf_parsing_never_writes_to_stdout(tmp_path: Path, capfd):
+    """stdout is the MCP JSON-RPC channel: library chatter must not reach it."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "Text page", fontsize=12)
+    scan = doc.new_page()  # image-only page, so OCR runs when an engine exists
+    out = io.BytesIO()
+    Image.new("RGB", (800, 1000), "white").save(out, "PNG")
+    scan.insert_image(scan.rect, stream=out.getvalue())
+    path = tmp_path / "mixed.pdf"
+    doc.save(path)
+
+    capfd.readouterr()
+    chomper.parse(str(path))
+    assert capfd.readouterr().out == ""

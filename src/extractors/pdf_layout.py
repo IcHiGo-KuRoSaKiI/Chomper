@@ -23,9 +23,11 @@ to:
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import logging
 import re
+import sys
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -199,14 +201,18 @@ def extract_with_layout(
     # Before parsing: OCR writes recognised text into the page objects, after
     # which a scanned page looks like it always had a text layer.
     text_layer = [bool(page.get_text("text").strip()) for page in pdf_document]
-    parsed = _layout.parse_document(
-        pdf_document,
-        use_ocr=_ocr_mode(ocr),
-        force_text=True,
-        render_html_tables=table_format == "html",
-        show_progress=False,
-    )
-    chunks = parsed.to_markdown(page_chunks=True, header=True, footer=True)
+    # pymupdf4llm prints progress and "Using Tesseract for OCR processing." to
+    # stdout. Under the MCP stdio transport stdout is the JSON-RPC channel, so
+    # every library message goes to stderr instead.
+    with contextlib.redirect_stdout(sys.stderr):
+        parsed = _layout.parse_document(
+            pdf_document,
+            use_ocr=_ocr_mode(ocr),
+            force_text=True,
+            render_html_tables=table_format == "html",
+            show_progress=False,
+        )
+        chunks = parsed.to_markdown(page_chunks=True, header=True, footer=True)
     page_count = len(chunks)
 
     # Running heads: header/footer text that repeats on other pages (numbers ignored).

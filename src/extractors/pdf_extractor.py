@@ -6,9 +6,11 @@ images, and layout from PDF documents.
 """
 from __future__ import annotations
 
+import contextlib
 import functools
 import hashlib
 import logging
+import sys
 from typing import Any
 
 import pymupdf as fitz
@@ -234,13 +236,14 @@ class PDFExtractor(BaseExtractor):
 
         # Convert first: pymupdf4llm configures PyMuPDF's layout analysis, so cell
         # extraction must happen afterwards to stay deterministic with structural chunks.
-        md_pages = pymupdf4llm.to_markdown(
-            file_path,
-            page_chunks=True,
-            table_strategy=self.table_strategy,
-            ignore_images=True,  # We extract images separately for better control
-            force_text=True
-        )
+        with contextlib.redirect_stdout(sys.stderr):  # keep stdout for MCP JSON-RPC
+            md_pages = pymupdf4llm.to_markdown(
+                file_path,
+                page_chunks=True,
+                table_strategy=self.table_strategy,
+                ignore_images=True,  # We extract images separately for better control
+                force_text=True
+            )
 
         # Extract the same cell grids used by structural chunks. Doing this for the
         # document at once lets headerless page continuations inherit their header.

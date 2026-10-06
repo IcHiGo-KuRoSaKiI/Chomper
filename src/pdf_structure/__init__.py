@@ -164,7 +164,7 @@ def parse_structure(
         FileNotFoundError: if the file does not exist.
     """
     try:
-        import fitz
+        import pymupdf as fitz
     except ImportError as exc:  # pragma: no cover
         raise ImportError(
             "PyMuPDF is required for structural PDF parsing. "
