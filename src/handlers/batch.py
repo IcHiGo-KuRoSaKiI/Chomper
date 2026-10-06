@@ -18,6 +18,7 @@ from mcp.types import TextContent
 from src.server.documents import load_document
 from src.server.helpers import (
     count_images_in_structure,
+    pdf_options,
     remove_image_placeholders,
     run_blocking,
     validate_file_path,
@@ -31,9 +32,14 @@ BATCH_CONCURRENCY = max(1, min(4, os.cpu_count() or 1))
 MAX_BATCH_FILES = 500
 
 
-def _parse_one(file_path_str: str, include_images: bool) -> dict[str, Any]:
+def _parse_one(
+    file_path_str: str,
+    include_images: bool,
+    ocr: str = "auto",
+    table_format: str = "markdown",
+) -> dict[str, Any]:
     file_path = validate_file_path(file_path_str)
-    raw_doc = load_document(file_path)
+    raw_doc = load_document(file_path, ocr=ocr, table_format=table_format)
     clean_text = remove_image_placeholders(raw_doc.text)
 
     doc_result: dict[str, Any] = {
@@ -68,6 +74,8 @@ async def handle_batch_parse(arguments: dict[str, Any]) -> list[TextContent]:
 
     include_images = bool(options.get("include_images", False))
     continue_on_error = bool(options.get("continue_on_error", True))
+    # PDF extraction options, validated once for the whole batch.
+    ocr, table_format = pdf_options(options)
 
     if not file_paths or not isinstance(file_paths, list):
         raise ValueError("file_paths is required: a non-empty array of absolute file paths.")
@@ -86,7 +94,9 @@ async def handle_batch_parse(arguments: dict[str, Any]) -> list[TextContent]:
     async def run(file_path_str: str) -> dict[str, Any]:
         async with semaphore:
             try:
-                return await run_blocking(_parse_one, file_path_str, include_images)
+                return await run_blocking(
+                    _parse_one, file_path_str, include_images, ocr, table_format
+                )
             except Exception as e:
                 logger.warning(f"Failed to parse {file_path_str}: {e}")
                 if not continue_on_error:

@@ -20,7 +20,11 @@ from .config import (
     DEFAULT_CHUNK_OVERLAP,
     DEFAULT_CHUNK_SIZE,
     DEFAULT_CHUNK_STRATEGY,
+    DEFAULT_PDF_OCR,
+    DEFAULT_PDF_TABLE_FORMAT,
     EXTRACTORS,
+    PDF_OCR_MODES,
+    PDF_TABLE_FORMATS,
     supported_extensions_hint,
 )
 
@@ -63,11 +67,71 @@ def extractor_class_for(path: Path) -> type:
     )
 
 
-def load_document(path: Path, *, use_cache: bool = True) -> Any:
-    """Extract ``path`` into a RawDocument, reusing a cached extraction when the file
-    is unchanged. The result is shared: treat it as read-only.
+#: Extractor options as passed to the extractor and stored in the cache key.
+ExtractorOptions = tuple[tuple[str, Any], ...]
+
+
+def validate_extract_options(ocr: str, table_format: str) -> None:
+    """Raise ValueError with the accepted values for a bad ``ocr``/``table_format``."""
+    if ocr not in PDF_OCR_MODES:
+        raise ValueError(
+            f"Unknown ocr mode: {ocr!r}. Use one of: {', '.join(PDF_OCR_MODES)} "
+            "('auto' OCRs only pages without a text layer)."
+        )
+    if table_format not in PDF_TABLE_FORMATS:
+        raise ValueError(
+            f"Unknown table_format: {table_format!r}. Use one of: {', '.join(PDF_TABLE_FORMATS)}."
+        )
+
+
+def extractor_options(
+    path: Path,
+    *,
+    ocr: str = DEFAULT_PDF_OCR,
+    table_format: str = DEFAULT_PDF_TABLE_FORMAT,
+) -> ExtractorOptions:
+    """Validated extractor keyword arguments for ``path``, in cache-key form.
+
+    Only PDFs take these options; other formats ignore them. Default values are
+    left out, so an explicit ``ocr="auto"`` shares the cache entry of a call that
+    did not pass it, while ``ocr="off"`` or ``table_format="html"`` get their own.
+
+    Raises:
+        ValueError: unknown ``ocr`` or ``table_format`` value.
     """
-    return cached_extract(path, extractor_class_for(path), use_cache=use_cache)
+    validate_extract_options(ocr, table_format)
+    if path.suffix.lower() != ".pdf":
+        return ()
+    options: list[tuple[str, Any]] = []
+    if ocr != DEFAULT_PDF_OCR:
+        options.append(("ocr", ocr))
+    if table_format != DEFAULT_PDF_TABLE_FORMAT:
+        options.append(("table_format", table_format))
+    return tuple(options)
+
+
+def load_document(
+    path: Path,
+    *,
+    use_cache: bool = True,
+    ocr: str = DEFAULT_PDF_OCR,
+    table_format: str = DEFAULT_PDF_TABLE_FORMAT,
+) -> Any:
+    """Extract ``path`` into a RawDocument, reusing a cached extraction when the file
+    is unchanged and the options match. The result is shared: treat it as read-only.
+
+    Args:
+        path: document to extract.
+        use_cache: read and fill the shared document cache.
+        ocr: PDFs only -- ``auto`` OCRs pages without a text layer (needs Tesseract
+            or RapidOCR), ``off`` never OCRs, ``force`` OCRs every page.
+        table_format: PDFs only -- ``markdown`` pipe tables or ``html`` tables.
+
+    Raises:
+        ValueError: unsupported format or invalid option.
+    """
+    options = extractor_options(path, ocr=ocr, table_format=table_format)
+    return cached_extract(path, extractor_class_for(path), options, use_cache=use_cache)
 
 
 def validate_chunk_options(
@@ -105,8 +169,15 @@ def build_chunker(
         fixed: fixed-size windows of ``chunk_size`` words that only break between
             lines (a single over-long line is split on sentences/words).
         semantic: embedding-based topic boundaries, ``chunk_size`` as a maximum.
+        layout: PDFs only -- the layout-model Markdown that ``parse()`` returns, split
+            on headings (hard cuts at levels 1-2), never inside a table or figure
+            line, with page numbers; other formats get their ``auto`` chunker.
     """
     validate_chunk_options(strategy, chunk_size, overlap, embedding_model)
+    if strategy == "layout" and ext == ".pdf":
+        from ..chunking.strategies.layout_pdf_chunker import LayoutPDFChunker
+
+        return LayoutPDFChunker(target_size=chunk_size, overlap=overlap)
     if strategy == "semantic":
         from ..chunking.strategies import SemanticChunker
 
@@ -151,16 +222,32 @@ def chunk_document(
     embedding_model: str = "fast",
     keywords: bool = False,
     use_cache: bool = True,
+    ocr: str = DEFAULT_PDF_OCR,
+    table_format: str = DEFAULT_PDF_TABLE_FORMAT,
 ) -> ChunkingOutcome:
     """Chunk ``path`` with the shared factory.
 
     PDFs on the ``auto`` strategy are chunked straight from the file by the
     structural chunker, skipping the Markdown extraction pass it does not need
-    (the extractor runs only if the structural parse fails).
+    (the extractor runs only if the structural parse fails). Every other strategy
+    chunks the extracted text, so ``ocr`` and ``table_format`` apply to it, and it
+    shares the cached extraction with ``parse()``.
+
+    Raises:
+        ValueError: unsupported format, bad option, or ``ocr``/``table_format``
+            set for a PDF on the ``auto`` strategy (which does not extract text).
     """
     ext = path.suffix.lower()
     extractor_class_for(path)  # fail fast on unsupported formats
+    options = extractor_options(path, ocr=ocr, table_format=table_format)
     chunker = build_chunker(ext, strategy, chunk_size, overlap, embedding_model)
+    if options and hasattr(chunker, "chunk_path"):
+        raise ValueError(
+            "ocr and table_format apply to extracted PDF text, but the 'auto' strategy "
+            "chunks PDFs with the structural chunker, which reads the file directly "
+            "(no OCR, Markdown tables). Use strategy 'layout' to chunk the extracted text "
+            f"with these options (got {dict(options)})."
+        )
 
     chunks: list[Any] | None = None
     raw_doc: Any | None = None
@@ -173,9 +260,9 @@ def chunk_document(
                 info["page_count"] = getattr(result, "page_count", None)
         except Exception as exc:  # any structural-parse failure falls back to extraction
             logger.warning("Structural parse of %s failed (%s); extracting instead.", path, exc)
-        raw_doc = peek_document(path, extractor_class_for(path)) if use_cache else None
+        raw_doc = peek_document(path, extractor_class_for(path), options) if use_cache else None
     if chunks is None:
-        raw_doc = load_document(path, use_cache=use_cache)
+        raw_doc = load_document(path, use_cache=use_cache, ocr=ocr, table_format=table_format)
         chunks = chunker.chunk(raw_doc)
 
     if keywords:

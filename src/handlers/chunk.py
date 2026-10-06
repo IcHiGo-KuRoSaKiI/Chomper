@@ -28,6 +28,8 @@ from src.server.documents import chunk_document, load_document, validate_chunk_o
 from src.server.helpers import (
     chunk_to_dict,
     int_arg,
+    pdf_options,
+    pdf_options_hint,
     remove_image_placeholders,
     run_blocking,
     validate_file_path,
@@ -55,6 +57,7 @@ async def handle_get_document_chunk(arguments: dict[str, Any]) -> list[TextConte
         hint=f"Use a positive number of characters, e.g. {DEFAULT_CHUNK_LIMIT}.",
     )
     assert offset is not None and limit is not None
+    pdf_options(arguments)
     return await run_blocking(_get_document_chunk_sync, arguments, offset, limit)
 
 
@@ -62,11 +65,12 @@ def _get_document_chunk_sync(
     arguments: dict[str, Any], offset: int, limit: int
 ) -> list[TextContent]:
     output_format = arguments.get("output_format", DEFAULT_OUTPUT_FORMAT)
+    ocr, table_format = pdf_options(arguments)
     file_path = validate_file_path(arguments.get("file_path"))
 
     logger.info(f"Getting document chunk: {file_path} (offset={offset}, limit={limit})")
 
-    raw_doc = load_document(file_path)
+    raw_doc = load_document(file_path, ocr=ocr, table_format=table_format)
 
     clean_text = remove_image_placeholders(raw_doc.text)
     total_chars = len(clean_text)
@@ -107,7 +111,8 @@ def _get_document_chunk_sync(
 
     if has_more:
         chunk_metadata["next_chunk_hint"] = (
-            f"Use get_document_chunk(file_path, offset={end_pos}, limit={limit}) "
+            f"Use get_document_chunk(file_path, offset={end_pos}, limit={limit}"
+            f"{pdf_options_hint(ocr, table_format)}) "
             f"to get next {min(remaining, limit)} of {remaining} remaining characters."
         )
 
@@ -138,6 +143,7 @@ async def handle_parse_document_chunked(arguments: dict[str, Any]) -> list[TextC
             f"Unknown chunking_strategy {strategy!r}. Use one of: {', '.join(CHUNK_STRATEGIES)}."
         )
     validate_chunk_options(strategy, chunk_size, overlap, embedding_model)
+    pdf_options(arguments)
     return await run_blocking(
         _parse_document_chunked_sync, arguments, chunk_size, overlap, strategy, embedding_model
     )
@@ -152,6 +158,7 @@ def _parse_document_chunked_sync(
 ) -> list[TextContent]:
     output_format = arguments.get("output_format", DEFAULT_OUTPUT_FORMAT)
     include_keywords = bool(arguments.get("include_keywords", False))
+    ocr, table_format = pdf_options(arguments)
     file_path = validate_file_path(arguments.get("file_path"))
 
     logger.info(
@@ -166,6 +173,8 @@ def _parse_document_chunked_sync(
         overlap=overlap,
         embedding_model=embedding_model,
         keywords=include_keywords,
+        ocr=ocr,
+        table_format=table_format,
     )
     chunks = outcome.chunks
     doc_metadata, total_chars = _document_summary(file_path, outcome)
@@ -224,6 +233,9 @@ def _parse_document_chunked_sync(
 
     if chunking_strategy == "semantic":
         response["embedding_model"] = embedding_model
+    if pdf_options_hint(ocr, table_format):
+        response["ocr"] = ocr
+        response["table_format"] = table_format
 
     return [TextContent(type="text", text=json.dumps(response, indent=2, default=str))]
 

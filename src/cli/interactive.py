@@ -31,13 +31,15 @@ except ImportError:
 class SessionState:
     """Tracks state across the interactive session."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize session state with defaults."""
         self.output_format: str = "text"
         self.json_mode: bool = False
         self.max_chars: int | None = None
         self.chunk_size: int = 1000
         self.chunk_strategy: str = "auto"
+        self.ocr: str = "auto"
+        self.table_format: str = "markdown"
         self.history: list[str] = []  # Files parsed this session
         self.template_path: str | None = None
 
@@ -49,6 +51,8 @@ class SessionState:
             "max_chars": self.max_chars,
             "chunk_size": self.chunk_size,
             "chunk_strategy": self.chunk_strategy,
+            "ocr": self.ocr,
+            "table_format": self.table_format,
             "template_path": self.template_path,
             "files_parsed": len(self.history),
         }
@@ -154,7 +158,10 @@ class InteractiveShell:
             completions = [c for c in commands if c.startswith(text)]
         elif parts[0] == "set" and (len(parts) == 1 or (len(parts) == 2 and not line.endswith(" "))):
             # Complete 'set' subcommands
-            settings = ["format", "json", "max-chars", "chunk-size", "strategy", "template"]
+            settings = [
+                "format", "json", "max-chars", "chunk-size", "strategy", "template",
+                "ocr", "table-format",
+            ]
             prefix = parts[1] if len(parts) > 1 else ""
             completions = [s for s in settings if s.startswith(prefix)]
         elif parts[0] == "set" and len(parts) >= 2 and parts[1] == "format":
@@ -169,7 +176,9 @@ class InteractiveShell:
             completions = [o for o in options if o.startswith(prefix)]
         elif parts[0] == "set" and len(parts) >= 2 and parts[1] == "strategy":
             # Complete strategies
-            strategies = ["auto", "recursive", "fixed", "semantic"]
+            from src.server.config import CHUNK_STRATEGIES
+
+            strategies = list(CHUNK_STRATEGIES)
             prefix = parts[2] if len(parts) > 2 else ""
             completions = [s for s in strategies if s.startswith(prefix)]
         elif parts[0] in ("parse", "metadata", "chunk"):
@@ -319,7 +328,12 @@ class InteractiveShell:
             return
 
         try:
-            result = chomper.parse(file_path, max_chars=self.state.max_chars)
+            result = chomper.parse(
+                file_path,
+                max_chars=self.state.max_chars,
+                ocr=self.state.ocr,  # type: ignore[arg-type]
+                table_format=self.state.table_format,  # type: ignore[arg-type]
+            )
 
             # Get formatter
             output_format = self.state.get_effective_format()
@@ -363,7 +377,11 @@ class InteractiveShell:
             return
 
         try:
-            meta = chomper.extract_metadata(file_path)
+            meta = chomper.extract_metadata(
+                file_path,
+                ocr=self.state.ocr,  # type: ignore[arg-type]
+                table_format=self.state.table_format,  # type: ignore[arg-type]
+            )
 
             output_format = self.state.get_effective_format()
             if output_format == "template" and not self.state.template_path:
@@ -409,6 +427,8 @@ class InteractiveShell:
                 file_path,
                 strategy=self.state.chunk_strategy,  # type: ignore
                 chunk_size=self.state.chunk_size,
+                ocr=self.state.ocr,  # type: ignore[arg-type]
+                table_format=self.state.table_format,  # type: ignore[arg-type]
             )
 
             output_format = self.state.get_effective_format()
@@ -466,8 +486,10 @@ class InteractiveShell:
             print("  json on|off       Toggle JSON output mode")
             print("  max-chars N       Set maximum output characters (0 = unlimited)")
             print("  chunk-size N      Set words per chunk (default: 1000)")
-            print("  strategy <name>   Set chunking strategy (auto, recursive, fixed, semantic)")
+            print("  strategy <name>   Set chunking strategy (auto, recursive, fixed, semantic, layout)")
             print("  template <path>   Set Jinja2 template file path")
+            print("  ocr <mode>        PDF OCR for pages without text (auto, off, force)")
+            print("  table-format <f>  PDF table output (markdown, html)")
             return
 
         parts = args.split(maxsplit=1)
@@ -527,7 +549,9 @@ class InteractiveShell:
                     print(f"Invalid number: {value}")
 
         elif option == "strategy":
-            valid_strategies = ["auto", "recursive", "fixed", "semantic"]
+            from src.server.config import CHUNK_STRATEGIES
+
+            valid_strategies = list(CHUNK_STRATEGIES)
             if not value:
                 print(f"Chunking strategy: {self.state.chunk_strategy}")
                 print(f"Valid strategies: {', '.join(valid_strategies)}")
@@ -537,6 +561,21 @@ class InteractiveShell:
             else:
                 print(f"Invalid strategy: {value}")
                 print(f"Valid strategies: {', '.join(valid_strategies)}")
+
+        elif option in ("ocr", "table-format"):
+            from src.server.config import PDF_OCR_MODES, PDF_TABLE_FORMATS
+
+            attr = "ocr" if option == "ocr" else "table_format"
+            valid = list(PDF_OCR_MODES if option == "ocr" else PDF_TABLE_FORMATS)
+            if not value:
+                print(f"{option}: {getattr(self.state, attr)}")
+                print(f"Valid values: {', '.join(valid)}")
+            elif value.lower() in valid:
+                setattr(self.state, attr, value.lower())
+                print(f"{option} set to: {value.lower()}")
+            else:
+                print(f"Invalid {option}: {value}")
+                print(f"Valid values: {', '.join(valid)}")
 
         elif option == "template":
             if not value:
@@ -603,7 +642,9 @@ Settings:
   set json on|off     Toggle JSON output mode
   set max-chars N     Set maximum output characters (0 = unlimited)
   set chunk-size N    Set words per chunk (default: 1000)
-  set strategy <name> Set chunking strategy (auto, recursive, fixed, semantic)
+  set strategy <name> Set chunking strategy (auto, recursive, fixed, semantic, layout)
+  set ocr <mode>      PDF OCR for pages without text (auto, off, force)
+  set table-format <f> PDF tables as markdown or html
   set template <path> Set Jinja2 template file
   status              Show current settings
 
