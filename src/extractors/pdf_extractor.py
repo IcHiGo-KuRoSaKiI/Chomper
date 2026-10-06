@@ -4,6 +4,8 @@ PDF extractor using PyMuPDF and PyMuPDF4LLM.
 Extracts text (with proper Markdown formatting including tables),
 images, and layout from PDF documents.
 """
+from __future__ import annotations
+
 import functools
 import hashlib
 import logging
@@ -13,7 +15,7 @@ import fitz
 
 from ..models.document import RawDocument
 from .base import BaseExtractor
-from .image_utils import image_marker, image_record
+from .image_utils import IMAGE_MARKER_RE, image_marker, image_record
 
 # Try to import pymupdf4llm for better markdown output
 try:
@@ -45,7 +47,8 @@ class PDFExtractor(BaseExtractor):
         min_image_height: int = 100,
         image_helper=None,
         use_markdown: bool = True,
-        table_strategy: str = 'lines_strict'
+        table_strategy: str = 'lines_strict',
+        extract_vector_figures: bool = True,
     ):
         """
         Initialize PDF extractor.
@@ -56,12 +59,16 @@ class PDFExtractor(BaseExtractor):
             image_helper: Optional image processing helper
             use_markdown: Use pymupdf4llm for Markdown output (recommended)
             table_strategy: Table detection strategy for pymupdf4llm
+            extract_vector_figures: Treat vector-drawn charts and diagrams as
+                figures (rendered on request) and mark them in the text
         """
         self.min_image_width = min_image_width
         self.min_image_height = min_image_height
         self.image_helper = image_helper
         self.use_markdown = use_markdown and PYMUPDF4LLM_AVAILABLE
         self.table_strategy = table_strategy
+        self.extract_vector_figures = extract_vector_figures
+        self._pages_without_text: list[int] = []
 
         if use_markdown and not PYMUPDF4LLM_AVAILABLE:
             logger.warning(
@@ -97,10 +104,25 @@ class PDFExtractor(BaseExtractor):
         # Get metadata
         metadata = self._get_basic_metadata(file_path)
         metadata.update(self._extract_pdf_metadata(pdf_document))
-        if not full_text.strip():
-            warning = "No text layer detected; use OCR to extract text from this PDF."
+        without_text = list(self._pages_without_text) if self.use_markdown else []
+        if not IMAGE_MARKER_RE.sub("", full_text).strip():
+            warning = (
+                "No text layer detected; use OCR to extract text from this PDF. "
+                "Scanned pages are marked in the text; fetch them with get_document_images."
+            )
             metadata.update({"no_text_layer": True, "warning": warning})
             logger.warning("%s: %s", file_path, warning)
+        elif without_text:
+            label = "Page" if len(without_text) == 1 else "Pages"
+            verb = "is a scanned image" if len(without_text) == 1 else "are scanned images"
+            warning = (
+                f"{label} {', '.join(map(str, without_text))} {verb} with no text layer; "
+                "that text is missing. Fetch the page images with get_document_images or use OCR."
+            )
+            metadata["warning"] = warning
+            logger.warning("%s: %s", file_path, warning)
+        if without_text:
+            metadata["pages_without_text_layer"] = without_text
 
         pdf_document.close()
 
@@ -133,6 +155,7 @@ class PDFExtractor(BaseExtractor):
         Returns:
             Tuple of (full_text, pages_structure)
         """
+        from ..pdf_structure.lists import list_indent_hints, normalize_markdown_lists
         from ..pdf_structure.tables import (
             TableRegion,
             extract_table_data,
@@ -186,10 +209,42 @@ class PDFExtractor(BaseExtractor):
         pages = []
         text_parts = []
 
+        # Raster images first, for every page: a logo repeated on most pages is
+        # still returned by get_document_images but gets no marker in the text.
+        rasters = [
+            self._extract_page_images(pdf_document, idx) if idx < len(pdf_document) else []
+            for idx in range(len(md_pages))
+        ]
+        pages_per_key: dict[str, set[int]] = {}
+        for idx, records in enumerate(rasters):
+            for record in records:
+                pages_per_key.setdefault(record["_key"], set()).add(idx)
+        repeated = {
+            key for key, on in pages_per_key.items()
+            if len(on) >= 3 and len(on) > 0.5 * len(md_pages)
+        }
+        tables_by_page: dict[int, list[tuple[float, float, float, float]]] = {}
+        for region in table_regions:
+            tables_by_page.setdefault(region.page, []).append(region.bbox)
+        self._pages_without_text = []
+
         for page_idx, md_page in enumerate(md_pages):
             page_text = md_page.get('text', '')
             replacements = replacements_by_page.get(page_idx + 1, [])
             page_text = replace_markdown_tables(page_text, replacements)
+            if page_idx < len(pdf_document):
+                page = pdf_document[page_idx]
+                lines = _page_lines(page)
+            else:  # pragma: no cover - defensive
+                page, lines = None, []
+            page_text = normalize_markdown_lists(page_text, list_indent_hints(lines))
+
+            figures: list[dict[str, Any]] = []
+            if page is not None:
+                figures = self._page_figures(
+                    page, file_path, rasters[page_idx], tables_by_page.get(page_idx + 1, []), lines,
+                )
+                page_text = self._place_figures(page, page_text, figures, lines, repeated)
             text_parts.append(page_text)
 
             # Build page structure
@@ -207,8 +262,8 @@ class PDFExtractor(BaseExtractor):
             # path entirely. Markdown text spans the whole page, so the page
             # rectangle is the honest bounding box for it.
             if page_text.strip():
-                if page_idx < len(pdf_document):
-                    rect = pdf_document[page_idx].rect
+                if page is not None:
+                    rect = page.rect
                     position = {
                         "x0": rect.x0, "y0": rect.y0,
                         "x1": rect.x1, "y1": rect.y1,
@@ -222,15 +277,97 @@ class PDFExtractor(BaseExtractor):
                     "position": position,
                 })
 
-            # Extract images for this page
-            if page_idx < len(pdf_document):
-                page_images = self._extract_page_images(pdf_document, page_idx)
-                page_data["content"].extend(page_images)
-
+            page_data["content"].extend(figures)
             pages.append(page_data)
 
         full_text = "\n\n".join(text_parts)
         return full_text, pages
+
+    def _page_figures(
+        self,
+        page,
+        file_path: str,
+        rasters: list[dict[str, Any]],
+        table_boxes: list[tuple[float, float, float, float]],
+        lines: list[_TextLine],
+    ) -> list[dict[str, Any]]:
+        """
+        Raster images plus vector-drawn figures on one page, captioned, in
+        reading order, with ids ``p<page>-<n>``.
+        """
+        from ..pdf_structure.figures import find_caption, find_vector_figures
+
+        page_no = page.number + 1
+        raster_boxes = [
+            (r["position"]["x0"], r["position"]["y0"], r["position"]["x1"], r["position"]["y1"])
+            for r in rasters
+        ]
+        vectors = []
+        if self.extract_vector_figures:
+            for rect in find_vector_figures(page, exclude=table_boxes + raster_boxes, lines=lines):
+                width_pt, height_pt = rect[2] - rect[0], rect[3] - rect[1]
+                dpi = max(72.0, min(200.0, 1568 * 72 / max(width_pt, height_pt, 1.0)))
+                record = image_record(
+                    loader=functools.partial(_render_pdf_region, file_path, page.number, rect, dpi),
+                    width=max(1, round(width_pt * dpi / 72)),
+                    height=max(1, round(height_pt * dpi / 72)),
+                    key=f"vector-{page_no}-{rect}",
+                    page=page_no,
+                    position={"x0": rect[0], "y0": rect[1], "x1": rect[2], "y1": rect[3]},
+                    kind="vector",
+                )
+                if record:
+                    vectors.append(record)
+
+        figures = sorted(
+            rasters + vectors, key=lambda r: (round(r["position"]["y0"]), r["position"]["x0"])
+        )
+        for n, figure in enumerate(figures, start=1):
+            figure["id"] = f"p{page_no}-{n}"
+            figure.setdefault("kind", "raster")
+            pos = figure["position"]
+            caption = find_caption((pos["x0"], pos["y0"], pos["x1"], pos["y1"]), lines)
+            if caption is not None:
+                figure["alt"] = caption.text
+                figure["_caption"] = caption
+        return figures
+
+    def _place_figures(
+        self,
+        page,
+        page_text: str,
+        figures: list[dict[str, Any]],
+        lines: list[_TextLine],
+        repeated: set[str],
+    ) -> str:
+        """Write each figure's ``![caption](image:id)`` marker into the page text."""
+        from ..pdf_structure.figures import PlacedFigure, insert_markers
+
+        page_area = abs(page.rect)
+        if not page_text.strip():
+            scans = [
+                f for f in figures
+                if f["kind"] == "raster" and _box_area(f["position"]) >= 0.5 * page_area
+            ]
+            if scans:
+                self._pages_without_text.append(page.number + 1)
+                for scan in scans:
+                    scan["alt"] = (
+                        f"Page {page.number + 1} is a scanned image with no text layer; "
+                        "fetch this image to read it"
+                    )
+        placed = [
+            PlacedFigure(
+                marker=image_marker(f["id"], f.get("alt", "")),
+                rect=(f["position"]["x0"], f["position"]["y0"], f["position"]["x1"], f["position"]["y1"]),
+                caption=f.get("_caption"),
+            )
+            for f in figures
+            if f["_key"] not in repeated
+        ]
+        if not page_text.strip():
+            return "\n\n".join(p.marker for p in placed)
+        return insert_markers(page_text, placed, lines)
 
     def _extract_page_images(self, pdf_document, page_idx: int) -> list[dict[str, Any]]:
         """
@@ -435,3 +572,36 @@ def _load_pdf_image(file_path: str, xref: int) -> bytes:
     with fitz.open(file_path) as pdf_document:
         base_image = pdf_document.extract_image(xref)
         return PDFExtractor._image_bytes(pdf_document, xref, base_image)
+
+
+class _TextLine:
+    """Minimal positional line for list-indent hints."""
+
+    __slots__ = ("text", "bbox")
+
+    def __init__(self, text: str, bbox: tuple[float, float, float, float]):
+        self.text = text
+        self.bbox = bbox
+
+
+def _page_lines(page) -> list[_TextLine]:
+    """Text lines with their boxes, ligatures expanded."""
+    flags = fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_LIGATURES
+    lines = []
+    for block in page.get_text("dict", flags=flags).get("blocks", []):
+        for line in block.get("lines", []):
+            text = "".join(span.get("text", "") for span in line.get("spans", [])).strip()
+            if text:
+                lines.append(_TextLine(text, tuple(line["bbox"])))
+    return lines
+
+
+def _box_area(position: dict[str, float]) -> float:
+    return max(0.0, position["x1"] - position["x0"]) * max(0.0, position["y1"] - position["y0"])
+
+
+def _render_pdf_region(file_path: str, page_index: int, rect: tuple[float, ...], dpi: float) -> bytes:
+    """Render one page region (a vector figure) to PNG when a caller asks for it."""
+    with fitz.open(file_path) as pdf_document:
+        pix = pdf_document[page_index].get_pixmap(clip=fitz.Rect(rect), dpi=round(dpi))
+        return pix.tobytes("png")

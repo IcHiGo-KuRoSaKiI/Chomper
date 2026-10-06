@@ -102,8 +102,12 @@ def image_only_pdf_path(tmp_path: Path) -> Path:
 def test_image_only_pdf_degrades_gracefully(image_only_pdf_path: Path):
     parsed = chomper.parse(str(image_only_pdf_path))
 
-    assert parsed.text == ""
+    # The text is just a marker telling the reader to fetch the page image.
+    assert parsed.text == (
+        "![Page 1 is a scanned image with no text layer; fetch this image to read it](image:p1-1)"
+    )
     assert parsed.metadata["no_text_layer"] is True
+    assert parsed.metadata["pages_without_text_layer"] == [1]
     assert "OCR" in parsed.metadata["warning"]
     assert chomper.chunk(str(image_only_pdf_path)) == []
 
