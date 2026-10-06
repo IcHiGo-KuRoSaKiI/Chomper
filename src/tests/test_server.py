@@ -320,8 +320,9 @@ def test_console_script_entry_point_is_synchronous() -> None:
 def test_server_import_does_not_load_extractors() -> None:
     code = (
         "import sys, server; "
-        "heavy = [m for m in ('src.extractors', 'pandas', 'trafilatura', 'extract_msg', "
-        "'fitz', 'numpy') if m in sys.modules]; print(heavy)"
+        "heavy = [m for m in ('src.extractors.pdf_extractor', 'src.extractors.excel_extractor', "
+        "'pandas', 'trafilatura', 'extract_msg', 'fitz', 'numpy') if m in sys.modules]; "
+        "print(heavy)"
     )
     out = subprocess.run(
         [sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True, check=True

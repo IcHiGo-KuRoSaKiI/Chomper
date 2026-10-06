@@ -27,6 +27,11 @@ from collections.abc import Callable, Hashable, Iterator
 from pathlib import Path
 from typing import Any, Generic, TypeVar
 
+# PyMuPDF (MuPDF) is not thread-safe, even across separate documents. Handlers run
+# extraction in worker threads, so every PyMuPDF use -- PDF extraction, structural
+# parsing and lazy PDF image loading -- is serialized on this one lock.
+from ..extractors.pymupdf_lock import PYMUPDF_LOCK
+
 logger = logging.getLogger("chomper")
 
 DEFAULT_CACHE_SIZE = 16
@@ -133,10 +138,6 @@ DOCUMENT_CACHE: LRUCache[tuple[Any, ...], Any] = LRUCache()
 STRUCTURE_CACHE: LRUCache[tuple[Any, ...], Any] = LRUCache()
 
 
-#: PyMuPDF (MuPDF) is not thread-safe, even across separate documents. Handlers run
-#: extraction in worker threads, so every PyMuPDF use -- PDF extraction, structural
-#: parsing and lazy PDF image loading -- is serialized on this lock.
-PYMUPDF_LOCK = threading.RLock()
 
 _PYMUPDF_SUFFIXES = {".pdf"}
 

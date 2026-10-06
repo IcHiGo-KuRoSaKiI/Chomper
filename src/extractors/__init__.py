@@ -1,88 +1,53 @@
-"""Extractors for different document formats."""
+"""Extractors for different document formats.
+
+Extractor classes load on first access (PEP 562), so importing this package -- or
+a light module inside it -- does not pull in PyMuPDF, pandas, extract_msg and the
+rest. An extractor whose optional dependency is missing resolves to ``None``,
+as before.
+"""
+
+from __future__ import annotations
+
+import importlib
+from typing import Any
 
 from .base import BaseExtractor
-from .code_extractor import CodeExtractor
 
-# Data formats (JSON always available, YAML/XML optional)
-from .data_extractor import JSONExtractor
-from .markdown_extractor import MarkdownExtractor
-from .text_extractor import TextExtractor
+#: Public name -> submodule that defines it.
+_SOURCES = {
+    "CodeExtractor": "code_extractor",
+    "JSONExtractor": "data_extractor",
+    "YAMLExtractor": "data_extractor",
+    "XMLExtractor": "data_extractor",
+    "MarkdownExtractor": "markdown_extractor",
+    "TextExtractor": "text_extractor",
+    "EMLExtractor": "email_extractor",
+    "MSGExtractor": "email_extractor",
+    "PDFExtractor": "pdf_extractor",
+    "DOCXExtractor": "docx_extractor",
+    "PPTXExtractor": "pptx_extractor",
+    "ExcelExtractor": "excel_extractor",
+    "CSVExtractor": "csv_extractor",
+    "HTMLExtractor": "html_extractor",
+    "EPUBExtractor": "epub_extractor",
+    "RTFExtractor": "rtf_extractor",
+}
 
-try:
-    from .data_extractor import YAMLExtractor
-except ImportError:
-    YAMLExtractor = None
 
-try:
-    from .data_extractor import XMLExtractor
-except ImportError:
-    XMLExtractor = None
+def __getattr__(name: str) -> Any:
+    module_name = _SOURCES.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    try:
+        value = getattr(importlib.import_module(f".{module_name}", __name__), name)
+    except ImportError:
+        value = None  # optional dependency not installed
+    globals()[name] = value
+    return value
 
-# Email formats (EML always available via stdlib)
-from .email_extractor import EMLExtractor
 
-try:
-    from .email_extractor import MSGExtractor
-except ImportError:
-    MSGExtractor = None
+def __dir__() -> list[str]:
+    return sorted([*globals(), *_SOURCES])
 
-# Optional heavy dependencies
-try:
-    from .pdf_extractor import PDFExtractor
-except ImportError:
-    PDFExtractor = None
 
-try:
-    from .docx_extractor import DOCXExtractor
-except ImportError:
-    DOCXExtractor = None
-
-try:
-    from .pptx_extractor import PPTXExtractor
-except ImportError:
-    PPTXExtractor = None
-
-try:
-    from .excel_extractor import ExcelExtractor
-except ImportError:
-    ExcelExtractor = None
-
-try:
-    from .csv_extractor import CSVExtractor
-except ImportError:
-    CSVExtractor = None
-
-try:
-    from .html_extractor import HTMLExtractor
-except ImportError:
-    HTMLExtractor = None
-
-try:
-    from .epub_extractor import EPUBExtractor
-except ImportError:
-    EPUBExtractor = None
-
-try:
-    from .rtf_extractor import RTFExtractor
-except ImportError:
-    RTFExtractor = None
-
-__all__ = [
-    "BaseExtractor",
-    "PDFExtractor",
-    "DOCXExtractor",
-    "PPTXExtractor",
-    "CodeExtractor",
-    "TextExtractor",
-    "MarkdownExtractor",
-    "ExcelExtractor",
-    "CSVExtractor",
-    "HTMLExtractor",
-    "JSONExtractor",
-    "YAMLExtractor",
-    "XMLExtractor",
-    "EMLExtractor",
-    "MSGExtractor",
-    "EPUBExtractor",
-    "RTFExtractor",
-]
+__all__ = ["BaseExtractor", *_SOURCES]

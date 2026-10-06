@@ -16,6 +16,7 @@ import fitz
 from ..models.document import RawDocument
 from .base import BaseExtractor
 from .image_utils import IMAGE_MARKER_RE, image_marker, image_record
+from .pymupdf_lock import PYMUPDF_LOCK
 
 # Try to import pymupdf4llm for better markdown output
 try:
@@ -578,7 +579,7 @@ class PDFExtractor(BaseExtractor):
 
 def _load_pdf_image(file_path: str, xref: int) -> bytes:
     """Bytes for one image, read from the file when a caller asks for it."""
-    with fitz.open(file_path) as pdf_document:
+    with PYMUPDF_LOCK, fitz.open(file_path) as pdf_document:
         base_image = pdf_document.extract_image(xref)
         return PDFExtractor._image_bytes(pdf_document, xref, base_image)
 
@@ -611,6 +612,6 @@ def _box_area(position: dict[str, float]) -> float:
 
 def _render_pdf_region(file_path: str, page_index: int, rect: tuple[float, ...], dpi: float) -> bytes:
     """Render one page region (a vector figure) to PNG when a caller asks for it."""
-    with fitz.open(file_path) as pdf_document:
+    with PYMUPDF_LOCK, fitz.open(file_path) as pdf_document:
         pix = pdf_document[page_index].get_pixmap(clip=fitz.Rect(rect), dpi=round(dpi))
         return pix.tobytes("png")

@@ -70,14 +70,6 @@ class TestResults:
 
 results = TestResults()
 
-# Extractor bugs being fixed separately (src/extractors is owned elsewhere).
-XFAIL_EXCEL_METADATA = (
-    "ExcelExtractor reports metadata['total_sheets'], not 'num_sheets' (extractor, fixed separately)"
-)
-XFAIL_HTML_DESCRIPTION = (
-    "HTMLExtractor lets trafilatura's og:description override <meta name=description> "
-    "(extractor, fixed separately)"
-)
 
 
 # ============================================================================
@@ -674,7 +666,6 @@ def test_integration():
 # EXCEL/CSV TESTS
 # ============================================================================
 
-@pytest.mark.xfail(strict=False, reason=XFAIL_EXCEL_METADATA)
 def test_excel_extractors():
     """Test Excel extractors."""
     print("\n" + "=" * 70)
@@ -752,7 +743,6 @@ def test_excel_extractors():
         results.add_fail("ExcelExtractor - Basic extraction", str(e))
 
 
-@pytest.mark.xfail(strict=False, reason=XFAIL_EXCEL_METADATA)
 def test_excel_extractor_multi_sheet():
     """Multi-sheet workbooks report two sheets."""
     if ExcelExtractor is None:
@@ -1014,7 +1004,6 @@ def test_html_extractors():
 
 
 
-@pytest.mark.xfail(strict=False, reason=XFAIL_HTML_DESCRIPTION)
 def test_html_extractor_metadata():
     """HTML <meta> title, author, description and Open Graph tags."""
     if HTMLExtractor is None:
