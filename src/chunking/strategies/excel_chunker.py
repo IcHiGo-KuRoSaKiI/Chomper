@@ -152,7 +152,7 @@ class ExcelChunker(BaseChunker):
                 Chunk(
                     chunk_id=0,
                     text=raw_doc.text,
-                    metadata={"source_type": "excel", "strategy": "fallback"}
+                    metadata={"source_type": "excel", "strategy": "fallback", "chunk_strategy": "fallback"}
                 )
             ]
 
@@ -247,6 +247,7 @@ class ExcelChunker(BaseChunker):
                 metadata={
                     "source_type": "excel",
                     "strategy": "by_sheet",
+                    "chunk_strategy": "by_sheet",
                     "sheet_name": sheet_data.get('sheet_name'),
                     "sheet_index": sheet_data.get('sheet_index'),
                     "num_rows": sheet_info.max_row if sheet_info else 0,
@@ -286,6 +287,7 @@ class ExcelChunker(BaseChunker):
                     metadata={
                         "source_type": "excel",
                         "strategy": "by_table",
+                        "chunk_strategy": "by_table",
                         "sheet_name": sheet_data.get('sheet_name'),
                         "table_index": None
                     }
@@ -311,6 +313,7 @@ class ExcelChunker(BaseChunker):
                     metadata={
                         "source_type": "excel",
                         "strategy": "by_table",
+                        "chunk_strategy": "by_table",
                         "sheet_name": sheet_data.get('sheet_name'),
                         "table_index": table_idx,
                         "table_range": table.range_str,
@@ -373,6 +376,7 @@ class ExcelChunker(BaseChunker):
                     metadata={
                         "source_type": "excel",
                         "strategy": "by_rows",
+                        "chunk_strategy": "by_rows",
                         "sheet_name": sheet_data.get('sheet_name'),
                         "row_start": start_idx + 1,  # Excel is 1-indexed
                         "row_end": end_idx,
@@ -420,6 +424,7 @@ class ExcelChunker(BaseChunker):
                 metadata={
                     "source_type": "csv",
                     "strategy": "by_rows",
+                    "chunk_strategy": "by_rows",
                     "row_start": start_idx + 1,
                     "row_end": end_idx,
                     "has_header": csv_metadata.has_header
