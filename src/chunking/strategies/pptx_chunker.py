@@ -120,7 +120,7 @@ class PPTXChunker(BaseChunker):
 
     def _simple_chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """
-        Fallback to simple chunking if no structure available.
+        Fallback when no slide structure is available: structure-aware text chunks.
 
         Args:
             raw_doc: Raw document
@@ -128,29 +128,6 @@ class PPTXChunker(BaseChunker):
         Returns:
             List of chunks
         """
-        chunks = []
-        words = raw_doc.text.split()
-
-        chunk_id = 0
-        start = 0
-
-        while start < len(words):
-            end = min(start + self.target_size, len(words))
-            chunk_words = words[start:end]
-            text = " ".join(chunk_words)
-
-            chunk = self._create_chunk(
-                chunk_id=chunk_id,
-                text=text,
-                metadata={
-                    "slide_number": chunk_id + 1,
-                    "section_type": "text",
-                    "chunk_strategy": "simple"
-                }
-            )
-            chunks.append(chunk)
-
-            chunk_id += 1
-            start = end
-
-        return chunks
+        if not (raw_doc.text or "").strip():
+            return []
+        return self._chunks_from_text(raw_doc.text, section_level=0, strategy="simple")

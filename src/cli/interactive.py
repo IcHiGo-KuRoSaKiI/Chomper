@@ -169,7 +169,7 @@ class InteractiveShell:
             completions = [o for o in options if o.startswith(prefix)]
         elif parts[0] == "set" and len(parts) >= 2 and parts[1] == "strategy":
             # Complete strategies
-            strategies = ["auto", "semantic", "fixed"]
+            strategies = ["auto", "recursive", "fixed", "semantic"]
             prefix = parts[2] if len(parts) > 2 else ""
             completions = [s for s in strategies if s.startswith(prefix)]
         elif parts[0] in ("parse", "metadata", "chunk"):
@@ -466,7 +466,7 @@ class InteractiveShell:
             print("  json on|off       Toggle JSON output mode")
             print("  max-chars N       Set maximum output characters (0 = unlimited)")
             print("  chunk-size N      Set words per chunk (default: 1000)")
-            print("  strategy <name>   Set chunking strategy (auto, semantic, fixed)")
+            print("  strategy <name>   Set chunking strategy (auto, recursive, fixed, semantic)")
             print("  template <path>   Set Jinja2 template file path")
             return
 
@@ -527,7 +527,7 @@ class InteractiveShell:
                     print(f"Invalid number: {value}")
 
         elif option == "strategy":
-            valid_strategies = ["auto", "semantic", "fixed"]
+            valid_strategies = ["auto", "recursive", "fixed", "semantic"]
             if not value:
                 print(f"Chunking strategy: {self.state.chunk_strategy}")
                 print(f"Valid strategies: {', '.join(valid_strategies)}")
@@ -603,7 +603,7 @@ Settings:
   set json on|off     Toggle JSON output mode
   set max-chars N     Set maximum output characters (0 = unlimited)
   set chunk-size N    Set words per chunk (default: 1000)
-  set strategy <name> Set chunking strategy (auto, semantic, fixed)
+  set strategy <name> Set chunking strategy (auto, recursive, fixed, semantic)
   set template <path> Set Jinja2 template file
   status              Show current settings
 

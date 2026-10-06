@@ -33,7 +33,7 @@ def get_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "content_base64": {"type": "string", "description": "Base64-encoded file content"},
+                    "content_base64": {"type": "string", "maxLength": 139810140, "description": "Base64-encoded file content (decoded size at most 100 MB)"},
                     "filename": {"type": "string", "description": "Filename with extension for format detection (e.g., 'report.pdf', 'data.xlsx', 'doc.docx')"},
                     "full_text": {"type": "boolean", "default": False, "description": "If true, return complete text. Default false returns first 5000 chars with continuation hint."},
                     "include_images": {"type": "boolean", "default": False, "description": "Include extracted images as ImageContent (default: false)."},
@@ -49,8 +49,8 @@ def get_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "file_path": {"type": "string", "description": "Absolute path to the document file"},
-                    "offset": {"type": "integer", "default": 0, "description": "Character offset to start from (default: 0)"},
-                    "limit": {"type": "integer", "default": 5000, "description": "Maximum characters to return (default: 5000)"},
+                    "offset": {"type": "integer", "default": 0, "minimum": 0, "description": "Character offset to start from (default: 0)"},
+                    "limit": {"type": "integer", "default": 5000, "minimum": 1, "description": "Maximum characters to return (default: 5000)"},
                     "output_format": {"type": "string", "enum": ["json", "toon"], "default": "json", "description": "Output format: 'json' (default) or 'toon' (token-optimized)"}
                 },
                 "required": ["file_path"]
@@ -63,25 +63,26 @@ def get_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "file_path": {"type": "string", "description": "Absolute path to the document file"},
-                    "page": {"type": "integer", "description": "Specific page number to get images from (1-indexed). Default: all pages."},
-                    "max_images": {"type": "integer", "default": 5, "description": "Maximum number of images to return (default: 5)"},
+                    "page": {"type": "integer", "minimum": 1, "description": "Specific page number to get images from (1-indexed). Default: all pages."},
+                    "max_images": {"type": "integer", "default": 5, "minimum": 1, "description": "Maximum number of images to return (default: 5)"},
                     "image_id": {"type": "string", "description": "Return only this image: the id in a text marker like ![Figure 2](image:p3-1)."},
-                    "max_dimension": {"type": "integer", "default": 1568, "description": "Downscale so the longest edge is at most this many pixels (default 1568, what vision models use). 0 returns full resolution."}
+                    "max_dimension": {"type": "integer", "default": 1568, "minimum": 0, "description": "Downscale so the longest edge is at most this many pixels (default 1568, what vision models use). 0 returns full resolution."}
                 },
                 "required": ["file_path"]
             }
         ),
         Tool(
             name="parse_document_chunked",
-            description="Parse a document into semantic chunks with configurable size and overlap. Ideal for processing large documents for RAG or embedding systems.",
+            description="Split a document into chunks for RAG or embedding systems. Chunk text keeps line breaks, lists, tables and code blocks; each chunk carries section_name, offsets and (with include_keywords) TF-IDF keywords. Same chunkers and defaults as the chomper library and CLI.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "file_path": {"type": "string", "description": "Absolute path to the document file"},
-                    "chunk_size": {"type": "integer", "default": 1000, "description": "Target words per chunk (default: 1000)"},
-                    "overlap": {"type": "integer", "default": 100, "description": "Words to overlap between chunks (default: 100)"},
-                    "chunking_strategy": {"type": "string", "enum": ["auto", "semantic", "fixed", "recursive"], "default": "auto", "description": "Chunking strategy: 'auto' (format-aware), 'semantic' (embedding-based for RAG), 'fixed' (character count), 'recursive' (paragraph/sentence)"},
+                    "chunk_size": {"type": "integer", "default": 1000, "minimum": 1, "description": "Maximum words per chunk (default: 1000)"},
+                    "overlap": {"type": "integer", "default": 100, "minimum": 0, "description": "Words to overlap between chunks (default: 100)"},
+                    "chunking_strategy": {"type": "string", "enum": ["auto", "semantic", "fixed", "recursive"], "default": "auto", "description": "Chunking strategy: 'auto' (format-aware: PDF structure, headings, code functions, sheets), 'recursive' (headings > paragraphs > lines > sentences, never inside code fences or table rows), 'fixed' (fixed word windows that break only between lines), 'semantic' (embedding-based topic boundaries)"},
                     "embedding_model": {"type": "string", "enum": ["fast", "balanced"], "default": "fast", "description": "Embedding model for semantic chunking: 'fast' (~80MB) or 'balanced' (~420MB, better quality)"},
+                    "include_keywords": {"type": "boolean", "default": False, "description": "Attach TF-IDF keywords (fitted across the document's chunks) to each chunk"},
                     "output_format": {"type": "string", "enum": ["json", "toon"], "default": "json", "description": "Output format: 'json' (default) or 'toon' (token-optimized)"}
                 },
                 "required": ["file_path"]
@@ -110,7 +111,7 @@ def get_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "file_paths": {"type": "array", "items": {"type": "string"}, "description": "Array of absolute paths to document files"},
+                    "file_paths": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 500, "description": "Array of absolute paths to document files (parsed concurrently)"},
                     "options": {
                         "type": "object",
                         "description": "Parsing options for all files",

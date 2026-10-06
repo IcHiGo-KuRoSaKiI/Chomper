@@ -29,13 +29,14 @@ Usage:
 import asyncio
 import logging
 import sys
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from typing import Any
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import (
+    CallToolResult,
     GetPromptResult,
     ImageContent,
     Prompt,
@@ -48,8 +49,7 @@ from mcp.types import (
 # Add src to path if needed
 sys.path.insert(0, str(Path(__file__).parent))
 
-# Import from new modular structure
-from src.handlers import (
+from src.handlers import (  # noqa: E402
     handle_batch_parse,
     handle_extract_metadata,
     handle_get_document_chunk,
@@ -59,10 +59,15 @@ from src.handlers import (
     handle_parse_document_bytes,
     handle_parse_document_chunked,
 )
-from src.prompts import PROMPTS, format_prompt
-from src.server.config import EXTRACTORS
-from src.server.helpers import format_error_response, get_extractor_for_file, validate_file_path
-from src.server.tools import get_tools
+from src.prompts import PROMPTS, format_prompt  # noqa: E402
+from src.server.config import EXTRACTORS  # noqa: E402
+from src.server.documents import load_document  # noqa: E402
+from src.server.helpers import (  # noqa: E402
+    run_blocking,
+    validate_arguments,
+    validate_file_path,
+)
+from src.server.tools import get_tools  # noqa: E402
 
 # Configure logging
 logging.basicConfig(
@@ -117,10 +122,9 @@ async def get_prompt(name: str, arguments: dict[str, str] | None = None) -> GetP
     if not file_path_str:
         raise ValueError("file_path is required for document prompts")
 
-    # Validate and parse document
+    # Validate and parse document (cached, off the event loop)
     file_path = validate_file_path(file_path_str)
-    extractor = get_extractor_for_file(file_path)
-    raw_doc = extractor.extract(str(file_path))
+    raw_doc = await run_blocking(load_document, file_path)
 
     # Get document info
     doc_type = file_path.suffix.lower().lstrip('.')
@@ -153,38 +157,69 @@ async def get_prompt(name: str, arguments: dict[str, str] | None = None) -> GetP
     )
 
 
-@server.call_tool()
-async def call_tool(name: str, arguments: dict[str, Any]) -> Sequence[TextContent | ImageContent]:
-    """Handle tool calls for document parsing."""
-    try:
-        if name == "parse_document":
-            return await handle_parse_document(arguments)
-        elif name == "parse_document_bytes":
-            return await handle_parse_document_bytes(arguments)
-        elif name == "get_document_chunk":
-            return await handle_get_document_chunk(arguments)
-        elif name == "get_document_images":
-            return await handle_get_document_images(arguments)
-        elif name == "parse_document_chunked":
-            return await handle_parse_document_chunked(arguments)
-        elif name == "extract_metadata":
-            return await handle_extract_metadata(arguments)
-        elif name == "list_supported_formats":
-            return await handle_list_supported_formats(arguments)
-        elif name == "batch_parse":
-            return await handle_batch_parse(arguments)
-        else:
-            return format_error_response(ValueError(f"Unknown tool: {name}"))
+ToolHandler = Callable[[dict[str, Any]], Awaitable[Sequence[TextContent | ImageContent]]]
 
+TOOL_HANDLERS: dict[str, ToolHandler] = {
+    "parse_document": handle_parse_document,
+    "parse_document_bytes": handle_parse_document_bytes,
+    "get_document_chunk": handle_get_document_chunk,
+    "get_document_images": handle_get_document_images,
+    "parse_document_chunked": handle_parse_document_chunked,
+    "extract_metadata": handle_extract_metadata,
+    "list_supported_formats": handle_list_supported_formats,
+    "batch_parse": handle_batch_parse,
+}
+
+#: Input schemas by tool name, checked by dispatch_tool (see validate_arguments).
+_TOOL_SCHEMAS: dict[str, dict[str, Any]] = {tool.name: tool.inputSchema for tool in get_tools()}
+
+
+def tool_error(tool: str, error: Exception) -> CallToolResult:
+    """A tool failure the client can see as one: ``isError=True`` plus a message
+    saying what was wrong (the handlers' messages also say what to do instead).
+    """
+    message = str(error) or type(error).__name__
+    return CallToolResult(
+        content=[TextContent(type="text", text=f"{tool} failed ({type(error).__name__}): {message}")],
+        isError=True,
+    )
+
+
+async def dispatch_tool(
+    name: str, arguments: dict[str, Any] | None
+) -> Sequence[TextContent | ImageContent] | CallToolResult:
+    """Run a tool; failures come back as ``CallToolResult(isError=True)``."""
+    handler = TOOL_HANDLERS.get(name)
+    if handler is None:
+        return tool_error(
+            name,
+            ValueError(f"Unknown tool: {name}. Available tools: {', '.join(TOOL_HANDLERS)}."),
+        )
+    try:
+        arguments = arguments or {}
+        validate_arguments(_TOOL_SCHEMAS[name], arguments)
+        return await handler(arguments)
+    except (ValueError, TypeError, FileNotFoundError, PermissionError, ImportError) as e:
+        logger.warning("Tool %s rejected the request: %s", name, e)
+        return tool_error(name, e)
     except Exception as e:
         logger.exception(f"Error in tool {name}")
-        return format_error_response(e)
+        return tool_error(name, e)
+
+
+@server.call_tool(validate_input=False)  # handlers validate, with actionable messages
+async def call_tool(
+    name: str, arguments: dict[str, Any]
+) -> Sequence[TextContent | ImageContent] | CallToolResult:
+    """Handle tool calls for document parsing."""
+    return await dispatch_tool(name, arguments)
 
 
 async def main() -> None:
     """Main entry point for the MCP server."""
     logger.info("Starting Chomper MCP Server")
-    logger.info(f"Available formats: {', '.join(sorted(EXTRACTORS.keys()))}")
+    # Formats are resolved lazily; listing them here would import every extractor.
+    logger.info(f"Known formats: {', '.join(EXTRACTORS.known())}")
 
     async with stdio_server() as (read_stream, write_stream):
         await server.run(
@@ -194,5 +229,10 @@ async def main() -> None:
         )
 
 
-if __name__ == "__main__":
+def run() -> None:
+    """Console-script entry point (``chomper``): run the async server."""
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    run()

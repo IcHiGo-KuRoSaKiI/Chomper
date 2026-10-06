@@ -90,10 +90,22 @@ class StructuralPDFChunker(BaseChunker):
                 return str(value)
         return None
 
-    def _chunk_from_pdf(self, source: str, raw_doc: RawDocument) -> list[Chunk]:
-        from ...pdf_structure import parse_structure
+    def chunk_path(self, source: str, filename: str | None = None) -> list[Chunk]:
+        """Chunk a PDF straight from its path, without running the text extractor.
 
-        result = parse_structure(
+        The structural parse reads the PDF itself and needs nothing from
+        ``PDFExtractor``; callers that only want chunks skip a full extraction pass.
+
+        Raises:
+            Exception: whatever the structural parse raises; callers fall back to
+                extracting and calling :meth:`chunk`.
+        """
+        return self._blocks_to_chunks(self._parse(source), filename)
+
+    def _parse(self, source: str):
+        from ...server.cache import cached_parse_structure
+
+        result = cached_parse_structure(
             source,
             source_folder=self.source_folder,
             max_words=self.target_size,
@@ -103,16 +115,37 @@ class StructuralPDFChunker(BaseChunker):
             tier_gap=self.tier_gap,
         )
         self.last_result = result
+        return result
 
-        filename = (raw_doc.metadata or {}).get("filename") or result.source_pdf_filename
+    def _chunk_from_pdf(self, source: str, raw_doc: RawDocument) -> list[Chunk]:
+        return self._blocks_to_chunks(
+            self._parse(source), (raw_doc.metadata or {}).get("filename")
+        )
+
+    def _blocks_to_chunks(self, result, filename: str | None) -> list[Chunk]:
+        """Chunks from structural blocks.
+
+        Offsets: ``start_char``/``end_char`` locate the block body in the
+        *structural text*, i.e. ``"\n\n".join(block.text for block in blocks)``
+        (``metadata["offsets"] == "structural_text"``). The structural parse reads
+        the PDF independently of the Markdown extractor, so its text is not a
+        substring of ``parse()`` output and cannot be mapped onto it reliably.
+        The heading breadcrumb prefix, when added, is not part of that span.
+        """
+        filename = filename or result.source_pdf_filename
 
         chunks: list[Chunk] = []
         cursor = 0
         for block in result.blocks:
-            text = block.text
+            body = block.text
+            text = body
             if self.preserve_context and block.heading_path:
-                body = text
-                if not body.lstrip().startswith("#"):
+                lead = body.lstrip()
+                last = block.heading_path.split(" > ")[-1].strip()
+                # Block text carries its heading as plain text, not "#" lines: do not
+                # repeat it ("Quarterly Report\n\nQuarterly Report\n\n...").
+                first_line = lead.split("\n", 1)[0].strip()
+                if not lead.startswith("#") and not (last and first_line == last):
                     text = f"{block.heading_path}\n\n{body}"
 
             metadata = block.to_metadata(
@@ -120,17 +153,18 @@ class StructuralPDFChunker(BaseChunker):
                 source_folder=self.source_folder,
             )
             metadata["source_hash"] = _hash_text(block.text)
+            metadata["offsets"] = "structural_text"
 
             chunks.append(
                 self._create_chunk(
                     chunk_id=block.sequence_index,
                     text=text,
                     start_char=cursor,
-                    end_char=cursor + len(text),
+                    end_char=cursor + len(body),
                     metadata=metadata,
                 )
             )
-            cursor += len(text)
+            cursor += len(body) + 2
 
         return chunks
 

@@ -130,14 +130,31 @@ For Python library usage: import chomper
         "--chunk-size",
         type=int,
         default=1000,
-        help="Target words per chunk (default: 1000)",
+        help="Maximum words per chunk (default: 1000)",
+    )
+
+    parser.add_argument(
+        "--overlap",
+        type=int,
+        default=100,
+        help="Words to overlap between chunks (default: 100)",
     )
 
     parser.add_argument(
         "--strategy",
-        choices=["auto", "semantic", "fixed"],
+        choices=["auto", "recursive", "fixed", "semantic"],
         default="auto",
-        help="Chunking strategy (default: auto)",
+        help=(
+            "Chunking strategy (default: auto). auto: format-aware; recursive: headings > "
+            "paragraphs > lines > sentences; fixed: word windows on line breaks; "
+            "semantic: embedding topic boundaries"
+        ),
+    )
+
+    parser.add_argument(
+        "--keywords",
+        action="store_true",
+        help="Attach TF-IDF keywords to each chunk (with --chunk)",
     )
 
     parser.add_argument(
@@ -312,6 +329,8 @@ def run_watch_mode(args: argparse.Namespace) -> int:
                     file_path,
                     strategy=args.strategy,
                     chunk_size=args.chunk_size,
+                    overlap=args.overlap,
+                    keywords=args.keywords,
                 )
                 output_text = formatter.format_chunks(chunks, str(file_path), args.strategy)
             else:
@@ -462,6 +481,8 @@ def main() -> int:
                 file_path,
                 strategy=args.strategy,
                 chunk_size=args.chunk_size,
+                overlap=args.overlap,
+                keywords=args.keywords,
             )
             output_text = formatter.format_chunks(chunks, str(file_path), args.strategy)
 

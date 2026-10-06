@@ -39,6 +39,7 @@ For MCP server usage, see: https://github.com/IcHiGo-KuRoSaKiI/Chomper
 from __future__ import annotations
 
 import base64
+import binascii
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -55,7 +56,13 @@ __all__ = [
     "ChunkResult",
     "MetadataResult",
     "ChomperError",
+    "is_supported",
+    "get_format",
+    "clear_cache",
 ]
+
+#: Whether ``chunk()`` attaches TF-IDF keywords unless told otherwise.
+KEYWORDS_BY_DEFAULT = False
 
 
 # =============================================================================
@@ -185,75 +192,99 @@ class ChomperError(Exception):
 # =============================================================================
 
 
-def _get_extractor(file_path: Path):
-    """Get the appropriate extractor for a file."""
-    from src.server.config import EXTRACTORS
-
-    ext = file_path.suffix.lower()
-    extractor_class = EXTRACTORS.get(ext)
-
-    if extractor_class is None:
-        raise ChomperError(
-            f"Unsupported file format: {ext}. "
-            f"Use chomper.list_formats() to see supported formats."
-        )
-
-    return extractor_class()
-
-
-def _get_chunker(file_path: Path, strategy: str):
-    """Get the appropriate chunker for a file and strategy."""
-    from src.server.config import CHUNKERS
-
-    ext = file_path.suffix.lower()
-
-    if strategy == "semantic":
-        from src.chunking.strategies import SemanticChunker
-        return SemanticChunker()
-    elif strategy == "fixed":
-        from src.chunking.strategies import TextChunker
-        return TextChunker()
-    elif strategy == "auto":
-        chunker_class = CHUNKERS.get(ext)
-        if chunker_class:
-            return chunker_class()
-        from src.chunking.strategies import TextChunker
-        return TextChunker()
-    else:
-        raise ChomperError(f"Unknown chunking strategy: {strategy}")
-
-
 def _validate_path(file_path: str | Path) -> Path:
     """Validate and resolve a file path."""
-    path = Path(file_path).expanduser().resolve()
+    from src.server.documents import validate_path
 
-    if not path.exists():
-        raise ChomperError(f"File not found: {path}")
+    try:
+        return validate_path(file_path)
+    except ValueError as e:
+        raise ChomperError(str(e)) from e
 
-    if not path.is_file():
-        raise ChomperError(f"Not a file: {path}")
 
-    return path
+def _load(path: Path, *, use_cache: bool = True) -> Any:
+    """Extract ``path`` through the shared document cache."""
+    from src.server.cache import cached_extract
+    from src.server.documents import extractor_class_for
+
+    try:
+        extractor_cls = extractor_class_for(path)
+    except ValueError as e:
+        raise ChomperError(str(e)) from e
+    # Extraction errors propagate unchanged, as they always have.
+    return cached_extract(path, extractor_cls, use_cache=use_cache)
+
+
+def _collect_images(raw_doc: Any) -> list[dict[str, Any]]:
+    """Gather image records from a RawDocument, however the extractor nested them.
+
+    Extractors are inconsistent: some advertise a top-level ``structure["images"]``,
+    others (PDF, PPTX, DOCX) nest image items inside per-page, per-slide or
+    per-section ``content`` lists. This delegates to the one shared walker every
+    entry point uses. Identical images are returned once, with ``pages`` listing
+    where they appear.
+    """
+    from src.extractors.image_utils import collect_images
+
+    return collect_images(getattr(raw_doc, "structure", None))
+
+
+def _decode_content(content: bytes | str) -> bytes:
+    """Raw bytes from bytes or base64 text, enforcing the input size cap."""
+    from src.server.config import MAX_BYTES_INPUT
+
+    if isinstance(content, str):
+        if len(content) > MAX_BYTES_INPUT * 4 // 3 + 4:
+            raise ChomperError(
+                f"Content is larger than the {MAX_BYTES_INPUT // (1024 * 1024)} MB limit. "
+                "Save it to a file and call chomper.parse(path) instead."
+            )
+        try:
+            content_bytes = base64.b64decode(content, validate=True)
+        except (binascii.Error, ValueError) as e:
+            raise ChomperError(
+                f"Invalid base64 content: {e}. Pass raw bytes, or standard base64 text."
+            ) from e
+    else:
+        content_bytes = content
+    if len(content_bytes) > MAX_BYTES_INPUT:
+        raise ChomperError(
+            f"Content is {len(content_bytes)} bytes, over the "
+            f"{MAX_BYTES_INPUT // (1024 * 1024)} MB limit. "
+            "Save it to a file and call chomper.parse(path) instead."
+        )
+    return content_bytes
+
+
+def _parse_path(
+    path: Path,
+    *,
+    include_images: bool,
+    max_chars: int | None,
+    use_cache: bool,
+) -> ParseResult:
+    raw_doc = _load(path, use_cache=use_cache)
+    text = raw_doc.text or ""
+
+    if max_chars is not None and max_chars >= 0 and len(text) > max_chars:
+        text = text[:max_chars]
+
+    metadata = dict(raw_doc.metadata) if raw_doc.metadata else {}
+
+    return ParseResult(
+        text=text,
+        metadata=metadata,
+        file_path=str(path),
+        format=path.suffix.lower().lstrip('.'),
+        word_count=len(text.split()),
+        char_count=len(text),
+        images=_collect_images(raw_doc) if include_images else [],
+    )
 
 
 # =============================================================================
 # Public API
 # =============================================================================
-
-
-def _collect_images(raw_doc) -> list[dict[str, Any]]:
-    """Gather image records from a RawDocument, however the extractor nested them.
-
-    Extractors are inconsistent: some advertise a top-level ``structure["images"]``,
-    others (PDF, PPTX, DOCX) nest image items inside per-page, per-slide or
-    per-section ``content`` lists. Reading only one of those shapes is how images
-    were extracted and then silently discarded (issue #1 for PDF, and PPTX after
-    that). This delegates to the one shared walker every entry point uses.
-    Identical images are returned once, with ``pages`` listing where they appear.
-    """
-    from src.extractors.image_utils import collect_images
-
-    return collect_images(getattr(raw_doc, "structure", None))
 
 
 def parse(
@@ -264,6 +295,9 @@ def parse(
 ) -> ParseResult:
     """
     Parse a document and extract text, metadata, and optionally images.
+
+    Repeated calls on an unchanged file reuse a cached extraction (see
+    ``CHOMPER_CACHE_SIZE`` / ``CHOMPER_DISABLE_CACHE``).
 
     Args:
         file_path: Path to the document file.
@@ -283,41 +317,7 @@ def parse(
         >>> print(f"Pages: {result.metadata.get('page_count')}")
     """
     path = _validate_path(file_path)
-    extractor = _get_extractor(path)
-
-    # Extract content
-    raw_doc = extractor.extract(str(path))
-
-    # Get text
-    text = raw_doc.text if hasattr(raw_doc, 'text') else str(raw_doc)
-    if isinstance(text, dict):
-        text = text.get('text', str(text))
-
-    # Apply max_chars limit
-    if max_chars and len(text) > max_chars:
-        text = text[:max_chars]
-
-    # Build metadata
-    metadata = {}
-    if hasattr(raw_doc, 'metadata') and raw_doc.metadata:
-        metadata = dict(raw_doc.metadata)
-
-    # Calculate counts
-    word_count = len(text.split())
-    char_count = len(text)
-
-    # Extract images info if requested
-    images = _collect_images(raw_doc) if include_images else []
-
-    return ParseResult(
-        text=text,
-        metadata=metadata,
-        file_path=str(path),
-        format=path.suffix.lower().lstrip('.'),
-        word_count=word_count,
-        char_count=char_count,
-        images=images,
-    )
+    return _parse_path(path, include_images=include_images, max_chars=max_chars, use_cache=True)
 
 
 def parse_bytes(
@@ -336,6 +336,8 @@ def parse_bytes(
     - Database BLOBs
     - In-memory documents
 
+    Content is capped at 100 MB; the temporary file is never cached.
+
     Args:
         content: Raw bytes or base64-encoded string.
         filename: Filename with extension (e.g., "report.pdf").
@@ -346,44 +348,35 @@ def parse_bytes(
         ParseResult with text, metadata, and document info.
 
     Raises:
-        ChomperError: If format not supported or content invalid.
+        ChomperError: If format not supported, content invalid or too large.
 
     Example:
-        >>> # From base64 string
         >>> result = chomper.parse_bytes(base64_content, "document.pdf")
-        >>>
-        >>> # From raw bytes
         >>> with open("doc.pdf", "rb") as f:
         ...     result = chomper.parse_bytes(f.read(), "doc.pdf")
-        >>>
-        >>> # From S3
-        >>> import boto3
-        >>> s3 = boto3.client('s3')
-        >>> obj = s3.get_object(Bucket='bucket', Key='doc.pdf')
-        >>> result = chomper.parse_bytes(obj['Body'].read(), "doc.pdf")
     """
-    # Decode if base64
-    if isinstance(content, str):
-        try:
-            content_bytes = base64.b64decode(content)
-        except Exception as e:
-            raise ChomperError(f"Invalid base64 content: {e}") from e
-    else:
-        content_bytes = content
-
-    # Get extension
     ext = Path(filename).suffix.lower()
     if not ext:
-        raise ChomperError(f"Filename must have an extension: {filename}")
+        raise ChomperError(
+            f"Filename must have an extension for format detection: {filename!r} "
+            "(e.g. 'report.pdf')."
+        )
+    if not is_supported(filename):
+        from src.server.config import EXTRACTORS
 
-    # Write to temp file
+        raise ChomperError(EXTRACTORS.unavailable_reason(ext) or f"Unsupported format: {ext}")
+
+    content_bytes = _decode_content(content)
+
     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
         tmp.write(content_bytes)
         tmp_path = Path(tmp.name)
 
     try:
-        result = parse(tmp_path, include_images=include_images, max_chars=max_chars)
-        # Update file_path to show original filename
+        result = _parse_path(
+            tmp_path.resolve(), include_images=include_images, max_chars=max_chars,
+            use_cache=False,
+        )
         result.file_path = filename
         return result
     finally:
@@ -393,96 +386,73 @@ def parse_bytes(
 def chunk(
     file_path: str | Path,
     *,
-    strategy: Literal["auto", "semantic", "fixed"] = "auto",
+    strategy: Literal["auto", "semantic", "fixed", "recursive"] = "auto",
     chunk_size: int = 1000,
     overlap: int = 100,
     embedding_model: Literal["fast", "balanced"] = "fast",
+    keywords: bool = KEYWORDS_BY_DEFAULT,
 ) -> list[ChunkResult]:
     """
     Split a document into chunks for RAG/embedding systems.
 
+    Chunk text keeps the document's line breaks, lists, tables and code blocks.
+    Uses the same chunkers, defaults and strategy names as the CLI and the MCP
+    ``parse_document_chunked`` tool.
+
     Args:
         file_path: Path to the document file.
         strategy: Chunking strategy:
-            - "auto": Format-aware (PDF by page, code by function)
+            - "auto": Format-aware (PDF structure, headings, code by function)
+            - "recursive": Structure-aware text (headings > paragraphs > lines >
+              sentences; never inside a code fence or table row)
+            - "fixed": Fixed word windows that only break between lines
             - "semantic": Embedding-based breakpoints (best for RAG)
-            - "fixed": Fixed word count
-        chunk_size: Target words per chunk (default: 1000).
+        chunk_size: Maximum words per chunk (default: 1000).
         overlap: Words to overlap between chunks (default: 100).
         embedding_model: For semantic strategy:
             - "fast": all-MiniLM-L6-v2 (~80MB, faster)
             - "balanced": all-mpnet-base-v2 (~420MB, better quality)
+        keywords: Attach TF-IDF keywords to each chunk.
 
     Returns:
         List of ChunkResult objects.
 
     Raises:
-        ChomperError: If file not found or format not supported.
+        ChomperError: If file not found, format not supported or options invalid.
 
     Example:
-        >>> # Auto-detect best strategy for format
         >>> chunks = chomper.chunk("/path/to/report.pdf")
-        >>>
-        >>> # Semantic chunking for RAG
-        >>> chunks = chomper.chunk(
-        ...     "/path/to/report.pdf",
-        ...     strategy="semantic",
-        ...     chunk_size=500,
-        ...     overlap=50
-        ... )
-        >>>
-        >>> # Process chunks
-        >>> for chunk in chunks:
-        ...     embedding = embed(chunk.text)
-        ...     store(embedding, chunk.keywords, chunk.section_name)
+        >>> for c in chunks:
+        ...     store(embed(c.text), c.keywords, c.section_name)
     """
+    from src.server.documents import chunk_document, keywords_of, section_name_of
+
     path = _validate_path(file_path)
-    extractor = _get_extractor(path)
-
-    # Extract content
-    raw_doc = extractor.extract(str(path))
-    text = raw_doc.text if hasattr(raw_doc, 'text') else str(raw_doc)
-    if isinstance(text, dict):
-        text = text.get('text', str(text))
-
-    # Get chunker
-    if strategy == "semantic":
-        from src.chunking.strategies import SemanticChunker
-        chunker = SemanticChunker(
-            target_size=chunk_size,
+    try:
+        outcome = chunk_document(
+            path,
+            strategy=strategy,
+            chunk_size=chunk_size,
             overlap=overlap,
-            model=embedding_model,
+            embedding_model=embedding_model,
+            keywords=keywords,
         )
-    else:
-        chunker = _get_chunker(path, strategy)
-        if hasattr(chunker, 'target_size'):
-            chunker.target_size = chunk_size
-        if hasattr(chunker, 'overlap'):
-            chunker.overlap = overlap
+    except ValueError as e:
+        raise ChomperError(str(e)) from e
 
-    # Chunk the document
-    chunks = chunker.chunk(raw_doc)
-
-    # Convert to ChunkResult objects
     results = []
-    for i, c in enumerate(chunks):
-        # Try 'text' first (src/models/document.py Chunk), then 'content' for compatibility
-        if hasattr(c, 'text') and isinstance(c.text, str):
-            chunk_text = c.text
-        elif hasattr(c, 'content') and isinstance(c.content, str):
-            chunk_text = c.content
-        else:
-            chunk_text = str(c)
-
+    for i, c in enumerate(outcome.chunks):
+        chunk_text = c.text if isinstance(getattr(c, "text", None), str) else str(c)
+        metadata = dict(getattr(c, "metadata", None) or {})
         results.append(ChunkResult(
             text=chunk_text,
             chunk_id=i,
             start_char=getattr(c, 'start_char', 0),
             end_char=getattr(c, 'end_char', len(chunk_text)),
             word_count=len(chunk_text.split()),
-            keywords=getattr(c, 'keywords', []),
-            section_name=getattr(c, 'section_name', None),
-            metadata=getattr(c, 'metadata', {}),
+            keywords=keywords_of(c),
+            section_name=section_name_of(c),
+            metadata=metadata,
         ))
 
     return results
@@ -490,12 +460,9 @@ def chunk(
 
 def extract_metadata(file_path: str | Path) -> MetadataResult:
     """
-    Quick metadata extraction without full document parsing.
+    Quick metadata extraction.
 
-    Useful for:
-    - File indexing
-    - Quick document previews
-    - Filtering before full parsing
+    Reuses a cached extraction when the same unchanged file was parsed before.
 
     Args:
         file_path: Path to the document file.
@@ -508,31 +475,21 @@ def extract_metadata(file_path: str | Path) -> MetadataResult:
 
     Example:
         >>> meta = chomper.extract_metadata("/path/to/report.pdf")
-        >>> print(f"Title: {meta.title}")
-        >>> print(f"Author: {meta.author}")
-        >>> print(f"Pages: {meta.page_count}")
-        >>> print(f"Size: {meta.file_size} bytes")
+        >>> print(meta.title, meta.author, meta.page_count, meta.file_size)
     """
-    path = _validate_path(file_path)
-    extractor = _get_extractor(path)
-
-    # Extract content for metadata
-    raw_doc = extractor.extract(str(path))
-
-    # Get metadata
-    metadata = {}
-    if hasattr(raw_doc, 'metadata') and raw_doc.metadata:
-        metadata = dict(raw_doc.metadata)
-
-    # Get text info
-    text = raw_doc.text if hasattr(raw_doc, 'text') else str(raw_doc)
-    if isinstance(text, dict):
-        text = text.get('text', str(text))
-
-    # Count images
     from src.extractors.image_utils import count_images
 
-    image_count = count_images(getattr(raw_doc, "structure", None))
+    path = _validate_path(file_path)
+    raw_doc = _load(path)
+
+    metadata = dict(raw_doc.metadata) if raw_doc.metadata else {}
+    text = raw_doc.text or ""
+
+    page_count = metadata.get('page_count')
+    if page_count is None and raw_doc.structure and isinstance(
+        raw_doc.structure.get("pages"), list
+    ):
+        page_count = len(raw_doc.structure["pages"])
 
     return MetadataResult(
         file_path=str(path),
@@ -544,12 +501,12 @@ def extract_metadata(file_path: str | Path) -> MetadataResult:
         subject=metadata.get('subject'),
         creator=metadata.get('creator'),
         producer=metadata.get('producer'),
-        page_count=metadata.get('page_count'),
+        page_count=page_count,
         created=metadata.get('created'),
         modified=metadata.get('modified'),
         text_length=len(text),
         word_count=len(text.split()),
-        image_count=image_count,
+        image_count=count_images(getattr(raw_doc, "structure", None)),
     )
 
 
@@ -561,26 +518,29 @@ def list_formats() -> dict[str, dict[str, Any]]:
         Dictionary of format extension to info dict containing:
         - description: Human-readable description
         - available: Whether dependencies are installed
-        - reason: Why unavailable (if applicable)
+        - reason: Why unavailable (if applicable), with the install command
 
     Example:
         >>> formats = chomper.list_formats()
-        >>> for ext, info in formats.items():
-        ...     if info['available']:
-        ...         print(f"{ext}: {info['description']}")
+        >>> [ext for ext, info in formats.items() if info['available']]
     """
-    from src.server.config import EXTRACTORS, FORMAT_DESCRIPTIONS
+    from src.server.config import describe_formats
 
-    result = {}
-    for ext, description in FORMAT_DESCRIPTIONS.items():
-        available = ext in EXTRACTORS
-        result[ext] = {
-            "description": description,
-            "available": available,
-            "reason": None if available else "Missing optional dependency",
+    return {
+        f["extension"]: {
+            "description": f["description"],
+            "available": f["available"],
+            "reason": f["reason"],
         }
+        for f in describe_formats()
+    }
 
-    return result
+
+def clear_cache() -> None:
+    """Drop every cached extraction (e.g. after rewriting many files in place)."""
+    from src.server.cache import clear_caches
+
+    clear_caches()
 
 
 # =============================================================================
@@ -590,7 +550,7 @@ def list_formats() -> dict[str, dict[str, Any]]:
 
 def is_supported(file_path: str | Path) -> bool:
     """
-    Check if a file format is supported.
+    Check if a file format is supported (and its dependencies are installed).
 
     Args:
         file_path: Path to file or just a filename with extension.
@@ -604,9 +564,9 @@ def is_supported(file_path: str | Path) -> bool:
         >>> chomper.is_supported("unknown.xyz")
         False
     """
-    ext = Path(file_path).suffix.lower()
     from src.server.config import EXTRACTORS
-    return ext in EXTRACTORS
+
+    return Path(file_path).suffix.lower() in EXTRACTORS
 
 
 def get_format(file_path: str | Path) -> str | None:
@@ -622,8 +582,6 @@ def get_format(file_path: str | Path) -> str | None:
     Example:
         >>> chomper.get_format("report.pdf")
         'pdf'
-        >>> chomper.get_format("document.docx")
-        'docx'
     """
     ext = Path(file_path).suffix.lower()
     if is_supported(file_path):

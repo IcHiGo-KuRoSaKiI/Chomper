@@ -3,9 +3,15 @@ Base class for document chunkers.
 
 All format-specific chunkers inherit from BaseChunker.
 """
+from __future__ import annotations
+
+import re
 from abc import ABC, abstractmethod
+from collections.abc import Callable
+from typing import Any
 
 from ..models.document import Chunk, RawDocument
+from .text_splitter import HeadingIndex, Unit, pack, section_spans, segment, split_spans
 
 
 class BaseChunker(ABC):
@@ -30,6 +36,10 @@ class BaseChunker(ABC):
             overlap: Words to overlap between chunks (for context)
             preserve_context: Whether to maintain document structure
         """
+        if target_size < 1:
+            raise ValueError(f"target_size must be at least 1, got {target_size}")
+        if overlap < 0:
+            raise ValueError(f"overlap must be 0 or more, got {overlap}")
         self.target_size = target_size
         self.overlap = overlap
         self.preserve_context = preserve_context
@@ -48,7 +58,6 @@ class BaseChunker(ABC):
         Raises:
             ValueError: If document is invalid or empty
         """
-        pass
 
     def _create_chunk(
         self,
@@ -56,7 +65,7 @@ class BaseChunker(ABC):
         text: str,
         start_char: int = 0,
         end_char: int = 0,
-        metadata: dict = None
+        metadata: dict[str, Any] | None = None
     ) -> Chunk:
         """
         Helper to create a chunk with standard format.
@@ -79,14 +88,23 @@ class BaseChunker(ABC):
             metadata=metadata or {}
         )
 
+    def _resolve(self, target_size: int | None, overlap: int | None) -> tuple[int, int]:
+        """Explicit arguments win over instance defaults; an explicit 0 is honoured."""
+        target = self.target_size if target_size is None else target_size
+        over = self.overlap if overlap is None else overlap
+        return max(1, target), max(0, over)
+
     def _split_by_word_count(
         self,
         text: str,
-        target_size: int = None,
-        overlap: int = None
+        target_size: int | None = None,
+        overlap: int | None = None
     ) -> list[str]:
         """
-        Simple word-count-based splitting with overlap.
+        Split text into pieces of at most ``target_size`` words, on structure.
+
+        Pieces are exact substrings of ``text`` (line breaks kept) and the loop always
+        terminates, even when ``overlap >= target_size``.
 
         Args:
             text: Text to split
@@ -96,21 +114,68 @@ class BaseChunker(ABC):
         Returns:
             List of text chunks
         """
-        target_size = target_size or self.target_size
-        overlap = overlap or self.overlap
+        target, over = self._resolve(target_size, overlap)
+        return [text[s:e] for s, e in split_spans(text, target, over)]
 
-        words = text.split()
-        chunks = []
-        start = 0
+    def _chunks_from_text(
+        self,
+        text: str,
+        *,
+        start_id: int = 0,
+        target_size: int | None = None,
+        overlap: int | None = None,
+        section_level: int = 6,
+        strategy: str = "recursive",
+        extra_metadata: dict[str, Any] | None = None,
+        prefer_structure: bool = True,
+        adjust_units: Callable[[str, list[Unit]], list[Unit]] | None = None,
+    ) -> list[Chunk]:
+        """Structure-aware chunks of ``text`` with section metadata and true offsets.
 
-        while start < len(words):
-            end = start + target_size
-            chunk_words = words[start:end]
-            chunks.append(" ".join(chunk_words))
+        The text is first cut at Markdown headings of level <= ``section_level`` (so a
+        chunk never spans two such sections), then each section is packed by
+        :func:`~src.chunking.text_splitter.split_spans`. Each chunk's text is
+        ``text[start_char:end_char]``.
+        """
+        target, over = self._resolve(target_size, overlap)
+        index = HeadingIndex(text)
+        if section_level > 0 and prefer_structure:
+            sections = [(s, e) for s, e, _ in section_spans(text, section_level)]
+        else:
+            sections = [(0, len(text))]
 
-            # Move start forward, accounting for overlap
-            start = end - overlap if end < len(words) else len(words)
-
+        chunks: list[Chunk] = []
+        for sec_start, sec_end in sections:
+            units = segment(text, target, sec_start, sec_end)
+            if adjust_units is not None:
+                units = adjust_units(text, units)
+            spans = [
+                (units[a].start, units[b - 1].end)
+                for a, b in pack(units, target, over, prefer_structure=prefer_structure)
+            ]
+            for s, e in spans:
+                heading, path = index.for_span(text, s, e)
+                body = text[s:e]
+                metadata: dict[str, Any] = {
+                    "section_name": heading.title if heading else None,
+                    "heading_path": " > ".join(path),
+                    "heading_level": heading.level if heading else 0,
+                    "has_code": "```" in body or "~~~" in body,
+                    "has_table": bool(re.search(r"^\s*\|", body, re.MULTILINE)),
+                    "section_type": "text",
+                    "chunk_strategy": strategy,
+                }
+                if extra_metadata:
+                    metadata.update(extra_metadata)
+                chunks.append(
+                    Chunk(
+                        chunk_id=start_id + len(chunks),
+                        text=body,
+                        start_char=s,
+                        end_char=e,
+                        metadata=metadata,
+                    )
+                )
         return chunks
 
     def _split_by_paragraphs(self, text: str) -> list[str]:
@@ -128,7 +193,7 @@ class BaseChunker(ABC):
 
     def _split_by_sentences(self, text: str) -> list[str]:
         """
-        Simple sentence splitting (can be improved with nltk).
+        Simple sentence splitting.
 
         Args:
             text: Text to split
@@ -136,7 +201,5 @@ class BaseChunker(ABC):
         Returns:
             List of sentences
         """
-        import re
-        # Simple regex for sentence boundaries
         sentences = re.split(r'(?<=[.!?])\s+', text)
         return [s.strip() for s in sentences if s.strip()]

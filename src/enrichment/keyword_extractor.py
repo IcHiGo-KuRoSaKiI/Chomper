@@ -11,6 +11,8 @@ from collections import Counter
 from ..models.document import Chunk, EnrichedChunk
 from .base import BaseEnricher
 
+_URL_RE = re.compile(r"\]\([^)\s]*\)|<?(?:https?|ftp)://\S+|\bwww\.\S+|\S+\.(?:svg|png|jpe?g|gif)\b")
+
 
 class KeywordExtractor(BaseEnricher):
     """
@@ -66,6 +68,59 @@ class KeywordExtractor(BaseEnricher):
 
         return enriched_chunks
 
+    def keywords_for_texts(self, texts: list[str]) -> list[list[str]]:
+        """Top keywords for each text, with IDF fitted across all of them.
+
+        Fitting one TF-IDF model over every chunk of a document is both faster
+        than one model per chunk and more meaningful: a term common to every chunk
+        (the product name, "page") scores low, terms specific to a chunk score high.
+        Falls back to RAKE per text when scikit-learn is unavailable.
+
+        Args:
+            texts: chunk texts of one document
+
+        Returns:
+            One keyword list per text (empty for blank text)
+        """
+        if not texts:
+            return []
+        if self.method == "rake":
+            return [self._rake_keywords(t)[:self.top_k] if t.strip() else [] for t in texts]
+        try:
+            from sklearn.feature_extraction.text import TfidfVectorizer
+        except ImportError:
+            return [self._rake_keywords(t)[:self.top_k] if t.strip() else [] for t in texts]
+
+        vectorizer = TfidfVectorizer(
+            stop_words="english",
+            ngram_range=(1, 2),
+            token_pattern=r"(?u)\b[a-zA-Z][a-zA-Z0-9_-]+\b",
+            sublinear_tf=True,
+        )
+        # URLs, link targets and image markers are not topics ("https", "img", "svg").
+        cleaned = [_URL_RE.sub(" ", t) for t in texts]
+        try:
+            matrix = vectorizer.fit_transform(cleaned).tocsr()
+        except ValueError:  # empty vocabulary (only stop words / numbers)
+            return [[] for _ in texts]
+        names = vectorizer.get_feature_names_out()
+        result: list[list[str]] = []
+        for row in range(matrix.shape[0]):
+            start, end = matrix.indptr[row], matrix.indptr[row + 1]
+            cols, scores = matrix.indices[start:end], matrix.data[start:end]
+            order = scores.argsort()[::-1]
+            picked: list[str] = []
+            for idx in order:
+                term = str(names[cols[idx]])
+                # Skip a unigram already covered by a chosen bigram, and vice versa.
+                if any(term in p.split() or p in term.split() for p in picked):
+                    continue
+                picked.append(term)
+                if len(picked) == self.top_k:
+                    break
+            result.append(picked)
+        return result
+
     def _rake_keywords(self, text: str) -> list[str]:
         """
         RAKE (Rapid Automatic Keyword Extraction) - regex-based.
@@ -109,7 +164,7 @@ class KeywordExtractor(BaseEnricher):
         for sentence in sentences:
             # Split by stopwords and non-word characters
             words = re.findall(r'\b[a-z]+\b', sentence)
-            phrase = []
+            phrase: list[str] = []
 
             for word in words:
                 if word in stopwords or len(word) < 3:
@@ -123,8 +178,8 @@ class KeywordExtractor(BaseEnricher):
                 candidates.append(' '.join(phrase))
 
         # Calculate word frequencies and degrees
-        word_freq = Counter()
-        word_degree = Counter()
+        word_freq: Counter[str] = Counter()
+        word_degree: Counter[str] = Counter()
 
         for candidate in candidates:
             words = candidate.split()

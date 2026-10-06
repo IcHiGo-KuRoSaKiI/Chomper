@@ -37,7 +37,11 @@ class ExcelChunker(BaseChunker):
         strategy: str = "auto",
         chunk_size: int = 100,  # For by_rows strategy
         preserve_headers: bool = True,
-        convert_to_html: bool = True
+        convert_to_html: bool = True,
+        *,
+        target_size: int = 1000,
+        overlap: int = 0,
+        preserve_context: bool = True,
     ):
         """
         Initialize Excel chunker.
@@ -47,7 +51,14 @@ class ExcelChunker(BaseChunker):
             chunk_size: Number of rows per chunk (for by_rows strategy)
             preserve_headers: Include headers in each chunk
             convert_to_html: Convert tables to HTML format for LLMs
+            target_size: Accepted for a uniform chunker interface; spreadsheets
+                are chunked by sheet, table or ``chunk_size`` rows, not words
+            overlap: Accepted for a uniform chunker interface (rows never overlap)
+            preserve_context: Accepted for a uniform chunker interface
         """
+        self.target_size = target_size
+        self.overlap = overlap
+        self.preserve_context = preserve_context
         self.strategy = strategy
         self.chunk_size = chunk_size
         self.preserve_headers = preserve_headers
@@ -55,6 +66,9 @@ class ExcelChunker(BaseChunker):
 
         if strategy not in ["auto", "by_sheet", "by_table", "by_rows"]:
             raise ValueError(f"Unknown strategy: {strategy}")
+        if chunk_size < 1:
+            # A zero row budget would never advance the by_rows loops.
+            raise ValueError(f"chunk_size must be at least 1 row, got {chunk_size}")
 
     def chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """
@@ -138,7 +152,7 @@ class ExcelChunker(BaseChunker):
                 Chunk(
                     chunk_id=0,
                     text=raw_doc.text,
-                    metadata={"source_type": "excel", "strategy": "fallback"}
+                    metadata={"source_type": "excel", "strategy": "fallback", "chunk_strategy": "fallback"}
                 )
             ]
 
@@ -233,6 +247,7 @@ class ExcelChunker(BaseChunker):
                 metadata={
                     "source_type": "excel",
                     "strategy": "by_sheet",
+                    "chunk_strategy": "by_sheet",
                     "sheet_name": sheet_data.get('sheet_name'),
                     "sheet_index": sheet_data.get('sheet_index'),
                     "num_rows": sheet_info.max_row if sheet_info else 0,
@@ -272,6 +287,7 @@ class ExcelChunker(BaseChunker):
                     metadata={
                         "source_type": "excel",
                         "strategy": "by_table",
+                        "chunk_strategy": "by_table",
                         "sheet_name": sheet_data.get('sheet_name'),
                         "table_index": None
                     }
@@ -297,6 +313,7 @@ class ExcelChunker(BaseChunker):
                     metadata={
                         "source_type": "excel",
                         "strategy": "by_table",
+                        "chunk_strategy": "by_table",
                         "sheet_name": sheet_data.get('sheet_name'),
                         "table_index": table_idx,
                         "table_range": table.range_str,
@@ -359,6 +376,7 @@ class ExcelChunker(BaseChunker):
                     metadata={
                         "source_type": "excel",
                         "strategy": "by_rows",
+                        "chunk_strategy": "by_rows",
                         "sheet_name": sheet_data.get('sheet_name'),
                         "row_start": start_idx + 1,  # Excel is 1-indexed
                         "row_end": end_idx,
@@ -406,6 +424,7 @@ class ExcelChunker(BaseChunker):
                 metadata={
                     "source_type": "csv",
                     "strategy": "by_rows",
+                    "chunk_strategy": "by_rows",
                     "row_start": start_idx + 1,
                     "row_end": end_idx,
                     "has_header": csv_metadata.has_header

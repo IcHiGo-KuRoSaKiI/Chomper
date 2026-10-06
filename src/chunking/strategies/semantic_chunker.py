@@ -4,13 +4,16 @@ Semantic chunker using sentence embeddings.
 This chunker uses sentence-transformers to create embeddings and finds
 semantic boundaries based on cosine similarity between adjacent text units.
 """
+from __future__ import annotations
+
 import numpy as np
 
 from ...models.document import Chunk, RawDocument
 from ..base import BaseChunker
+from ..text_splitter import BLOCK, Unit, pack, segment
 
 # Lazy loading for sentence-transformers
-_model_cache = {}
+_model_cache: dict[str, object] = {}
 
 
 def _get_embedding_model(model_name: str):
@@ -112,88 +115,151 @@ class SemanticChunker(BaseChunker):
         """
         Split document into semantically coherent chunks.
 
+        Every word of the document lands in a chunk (merging small groups never drops
+        text), no chunk exceeds ``target_size`` words unless a single code block or
+        table row does, and ``overlap`` words of whole lines/sentences are repeated.
+
         Args:
             raw_doc: Raw document from extractor
 
         Returns:
-            List of chunks with semantic boundaries
+            List of chunks; ``chunk.text == raw_doc.text[chunk.start_char:chunk.end_char]``
         """
         text = raw_doc.text
         if not text or not text.strip():
             return []
 
-        # Step 1: Split into sentences/paragraphs (small units)
-        units = self._split_into_units(text)
-        if len(units) <= 1:
-            # Document too small, return as single chunk
-            return [self._create_chunk(
-                chunk_id=0,
-                text=text,
-                start_char=0,
-                end_char=len(text),
-                metadata={"chunk_strategy": "semantic", "reason": "document_too_small"}
-            )]
+        base = segment(text, self.target_size)
+        if not base:
+            return []
 
-        # Step 2: Compute embeddings for all units
-        embeddings = self._compute_embeddings(units)
+        # Step 1: embedding units = paragraphs, each cut to at most target_size words.
+        unit_ranges = self._paragraph_ranges(base)
+        if len(unit_ranges) <= 1:
+            groups = [(0, len(base))]
+            reason: str | None = "document_too_small"
+        else:
+            units = [
+                (text[base[a].start:base[b - 1].end], base[a].start, base[b - 1].end)
+                for a, b in unit_ranges
+            ]
+            # Steps 2-4: embed, measure adjacent distances, pick breakpoints.
+            embeddings = self._compute_embeddings(units)
+            distances = self._calculate_distances(embeddings)
+            breakpoints = self._find_breakpoints(distances)
+            groups = self._groups_from_breakpoints(base, unit_ranges, breakpoints)
+            reason = None
 
-        # Step 3: Calculate distances between adjacent units
-        distances = self._calculate_distances(embeddings)
+        # Step 5: enforce the size limit, then add overlap, then build chunks.
+        pieces: list[tuple[int, int]] = []
+        for a, b in groups:
+            sub = base[a:b]
+            pieces.extend((a + x, a + y) for x, y in pack(sub, self.target_size, 0))
+        return self._build_chunks(text, base, pieces, reason)
 
-        # Step 4: Find semantic breakpoints
-        breakpoints = self._find_breakpoints(distances)
+    def _paragraph_ranges(self, base: list[Unit]) -> list[tuple[int, int]]:
+        """Index ranges of paragraphs (blank-line blocks), oversized ones subdivided."""
+        starts = [i for i, u in enumerate(base) if i == 0 or u.strength >= BLOCK]
+        bounds = starts + [len(base)]
+        ranges: list[tuple[int, int]] = []
+        for a, b in zip(bounds, bounds[1:], strict=False):
+            ranges.extend((a + x, a + y) for x, y in pack(base[a:b], self.target_size, 0))
+        return ranges
 
-        # Step 5: Create chunks from breakpoints
-        chunks = self._create_chunks_from_breakpoints(
-            text=text,
-            units=units,
-            breakpoints=breakpoints
-        )
+    def _groups_from_breakpoints(
+        self,
+        base: list[Unit],
+        unit_ranges: list[tuple[int, int]],
+        breakpoints: list[int],
+    ) -> list[tuple[int, int]]:
+        """Group embedding units between breakpoints; merge undersized groups.
 
+        A group below ``min_chunk_size`` words is merged into the next group (the
+        last one into the previous), so nothing is ever discarded.
+        """
+        cuts = sorted({b + 1 for b in breakpoints if 0 <= b < len(unit_ranges) - 1})
+        bounds = [0] + cuts + [len(unit_ranges)]
+        groups = [
+            (unit_ranges[a][0], unit_ranges[b - 1][1])
+            for a, b in zip(bounds, bounds[1:], strict=False)
+            if b > a
+        ]
+
+        def words(group: tuple[int, int]) -> int:
+            return sum(u.words for u in base[group[0]:group[1]])
+
+        merged: list[tuple[int, int]] = []
+        pending: tuple[int, int] | None = None
+        for group in groups:
+            if pending is not None:
+                group = (pending[0], group[1])
+                pending = None
+            if words(group) < self.min_chunk_size:
+                pending = group
+                continue
+            merged.append(group)
+        if pending is not None:
+            if merged:
+                merged[-1] = (merged[-1][0], pending[1])
+            else:
+                merged.append(pending)
+        return merged
+
+    def _build_chunks(
+        self,
+        text: str,
+        base: list[Unit],
+        pieces: list[tuple[int, int]],
+        reason: str | None,
+    ) -> list[Chunk]:
+        """Turn unit ranges into chunks, prepending up to ``overlap`` words."""
+        chunks: list[Chunk] = []
+        prev_start = -1
+        for a, b in pieces:
+            start_idx = a
+            if self.overlap and chunks:
+                carried = 0
+                room = self.target_size - sum(u.words for u in base[a:b])
+                budget = min(self.overlap, room)
+                while start_idx - 1 > prev_start:
+                    unit = base[start_idx - 1]
+                    if unit.kind == "code" or carried + unit.words > budget:
+                        break
+                    carried += unit.words
+                    start_idx -= 1
+            prev_start = a
+            start_char, end_char = base[start_idx].start, base[b - 1].end
+            metadata: dict = {
+                "chunk_strategy": "semantic",
+                "model": self.model_key,
+                "breakpoint_strategy": self.breakpoint_strategy,
+                "unit_count": b - start_idx,
+                "section_type": "text",
+            }
+            if reason:
+                metadata["reason"] = reason
+            chunks.append(
+                Chunk(
+                    chunk_id=len(chunks),
+                    text=text[start_char:end_char],
+                    start_char=start_char,
+                    end_char=end_char,
+                    metadata=metadata,
+                )
+            )
         return chunks
 
     def _split_into_units(self, text: str) -> list[tuple[str, int, int]]:
         """
-        Split text into small units (sentences or paragraphs).
+        Split text into embedding units: paragraphs no larger than ``target_size``.
 
         Returns list of (text, start_char, end_char) tuples.
         """
-        units = []
-
-        # Try splitting by paragraphs first
-        paragraphs = text.split("\n\n")
-
-        current_pos = 0
-        for para in paragraphs:
-            para = para.strip()
-            if not para:
-                current_pos += 2  # Skip the \n\n
-                continue
-
-            # Find actual position in original text
-            start = text.find(para, current_pos)
-            if start == -1:
-                start = current_pos
-            end = start + len(para)
-
-            # If paragraph is very long, split into sentences
-            if len(para.split()) > self.target_size:
-                sentences = self._split_by_sentences(para)
-                sent_pos = start
-                for sent in sentences:
-                    sent_start = text.find(sent, sent_pos)
-                    if sent_start == -1:
-                        sent_start = sent_pos
-                    sent_end = sent_start + len(sent)
-                    if sent.strip():
-                        units.append((sent.strip(), sent_start, sent_end))
-                    sent_pos = sent_end
-            else:
-                units.append((para, start, end))
-
-            current_pos = end
-
-        return units
+        base = segment(text, self.target_size)
+        return [
+            (text[base[a].start:base[b - 1].end], base[a].start, base[b - 1].end)
+            for a, b in self._paragraph_ranges(base)
+        ]
 
     def _compute_embeddings(self, units: list[tuple[str, int, int]]) -> np.ndarray:
         """
@@ -269,75 +335,3 @@ class SemanticChunker(BaseChunker):
             breakpoints = []
 
         return breakpoints
-
-    def _create_chunks_from_breakpoints(
-        self,
-        text: str,
-        units: list[tuple[str, int, int]],
-        breakpoints: list[int]
-    ) -> list[Chunk]:
-        """
-        Create chunks using the detected breakpoints.
-
-        Args:
-            text: Original document text
-            units: List of (text, start, end) tuples
-            breakpoints: Indices where to break
-
-        Returns:
-            List of Chunk objects
-        """
-        chunks = []
-
-        # Add start and end boundaries
-        all_breaks = [0] + [b + 1 for b in breakpoints] + [len(units)]
-
-        chunk_id = 0
-        for i in range(len(all_breaks) - 1):
-            start_idx = all_breaks[i]
-            end_idx = all_breaks[i + 1]
-
-            # Get units for this chunk
-            chunk_units = units[start_idx:end_idx]
-            if not chunk_units:
-                continue
-
-            # Combine unit texts
-            chunk_text = " ".join([u[0] for u in chunk_units])
-
-            # Check if chunk is too small, merge with next if possible
-            word_count = len(chunk_text.split())
-            if word_count < self.min_chunk_size and i < len(all_breaks) - 2:
-                # Skip this chunk, it will be merged with the next one
-                continue
-
-            # Get character positions
-            start_char = chunk_units[0][1]
-            end_char = chunk_units[-1][2]
-
-            chunks.append(self._create_chunk(
-                chunk_id=chunk_id,
-                text=chunk_text,
-                start_char=start_char,
-                end_char=end_char,
-                metadata={
-                    "chunk_strategy": "semantic",
-                    "model": self.model_key,
-                    "breakpoint_strategy": self.breakpoint_strategy,
-                    "unit_count": len(chunk_units),
-                    "section_type": "text"
-                }
-            ))
-            chunk_id += 1
-
-        # Handle edge case: no chunks created
-        if not chunks:
-            chunks.append(self._create_chunk(
-                chunk_id=0,
-                text=text,
-                start_char=0,
-                end_char=len(text),
-                metadata={"chunk_strategy": "semantic", "reason": "no_breakpoints_found"}
-            ))
-
-        return chunks
