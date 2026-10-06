@@ -34,9 +34,7 @@ except ImportError:
     EBOOKLIB_AVAILABLE = False
 
 try:
-    from bs4 import BeautifulSoup
-
-    from .html_markdown import HTMLToMarkdown, body_of, strip_boilerplate
+    from .html_markdown import HTMLToMarkdown, body_of, parse_html, strip_boilerplate
 
     BS4_AVAILABLE = True
 except ImportError:
@@ -206,7 +204,7 @@ class EPUBExtractor(BaseExtractor):
             if not content:
                 continue
             current_dir[0] = posixpath.dirname(item.get_name())
-            soup = BeautifulSoup(content, "lxml")
+            soup = parse_html(content)
             strip_boilerplate(soup, chrome=False)
             text = converter.convert(body_of(soup))
             if not text.strip():

@@ -38,9 +38,7 @@ from .base import BaseExtractor
 from .encoding_utils import decode_bytes
 
 try:
-    from bs4 import BeautifulSoup
-
-    from .html_markdown import HTMLToMarkdown, body_of, strip_boilerplate
+    from .html_markdown import HTMLToMarkdown, body_of, parse_html, strip_boilerplate
 
     BS4_AVAILABLE = True
 except ImportError:
@@ -79,7 +77,7 @@ def html_body_to_markdown(
         key = src[4:] if src.lower().startswith("cid:") else src
         return inline_images.get(key.strip("<>"))
 
-    soup = BeautifulSoup(html, "lxml")
+    soup = parse_html(html)
     strip_boilerplate(soup, chrome=False)
     converter = HTMLToMarkdown(image_loader=load)
     return converter.convert(body_of(soup)), converter.images

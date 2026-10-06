@@ -47,6 +47,7 @@ if BS4_AVAILABLE:
         body_of,
         find_tag,
         main_content,
+        parse_html,
         strip_boilerplate,
     )
 
@@ -138,7 +139,7 @@ class HTMLExtractor(BaseExtractor):
             RawDocument with Markdown text, metadata and structure
         """
         self.validate_file(file_path)
-        soup = BeautifulSoup(Path(file_path).read_bytes(), "lxml")
+        soup = parse_html(Path(file_path).read_bytes())
 
         html_doc = HTMLDocument()
         if self.extract_metadata_flag:

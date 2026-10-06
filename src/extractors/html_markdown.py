@@ -36,11 +36,12 @@ import base64
 import binascii
 import logging
 import re
+import warnings
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import unquote_to_bytes, urljoin
 
-from bs4 import BeautifulSoup, Comment, NavigableString, Tag
+from bs4 import BeautifulSoup, Comment, MarkupResemblesLocatorWarning, NavigableString, Tag
 from bs4.element import CData, Declaration, Doctype, ProcessingInstruction
 
 from .image_utils import image_marker, image_record
@@ -112,6 +113,13 @@ def _clean_inline(text: str) -> str:
 def _int(value: str, default: int) -> int:
     match = re.match(r"\s*-?\d+", value or "")
     return int(match.group()) if match else default
+
+
+def parse_html(markup: str | bytes) -> BeautifulSoup:
+    """Parse HTML once with lxml (tiny documents don't trigger bs4's filename warning)."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", MarkupResemblesLocatorWarning)
+        return BeautifulSoup(markup, "lxml")
 
 
 def find_tag(node: Tag, *args: Any, **kwargs: Any) -> Tag | None:
@@ -573,7 +581,7 @@ def html_to_markdown(
     Returns ``(markdown, image_records)``. ``main_only`` narrows to the main
     content and strips page chrome; scripts and styles are always removed.
     """
-    soup = BeautifulSoup(html, "lxml")
+    soup = parse_html(html)
     strip_boilerplate(soup, chrome=main_only)
     root = main_content(soup) if main_only else body_of(soup)
     converter = HTMLToMarkdown(base_url, image_loader, min_image_width, min_image_height)
