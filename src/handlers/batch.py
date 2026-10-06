@@ -8,7 +8,7 @@ from typing import Any
 from mcp.types import TextContent
 
 from src.server.helpers import (
-    extract_images_from_structure,
+    count_images_in_structure,
     get_extractor_for_file,
     remove_image_placeholders,
     validate_file_path,
@@ -68,8 +68,7 @@ async def handle_batch_parse(arguments: dict[str, Any]) -> list[TextContent]:
 
             # Add image info if requested
             if include_images:
-                images = extract_images_from_structure(raw_doc.structure)
-                doc_result["image_count"] = len(images)
+                doc_result["image_count"] = count_images_in_structure(raw_doc.structure)
 
             results.append(doc_result)
             successful += 1

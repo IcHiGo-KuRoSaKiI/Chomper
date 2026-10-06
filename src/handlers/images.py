@@ -7,8 +7,10 @@ from typing import Any
 
 from mcp.types import ImageContent, TextContent
 
+from src.extractors.image_utils import DEFAULT_MAX_DIMENSION
 from src.server.config import DEFAULT_MAX_IMAGES
 from src.server.helpers import (
+    count_images_in_structure,
     detect_mime_type,
     extract_images_from_structure,
     get_extractor_for_file,
@@ -30,12 +32,21 @@ async def handle_get_document_images(arguments: dict[str, Any]) -> list[TextCont
     """
     file_path_str = arguments.get("file_path")
     page_filter = arguments.get("page")  # Optional, 1-indexed
+    image_id = arguments.get("image_id")
     max_images = arguments.get("max_images", DEFAULT_MAX_IMAGES)
+    max_dimension = arguments.get("max_dimension", DEFAULT_MAX_DIMENSION)
+    if not isinstance(max_images, int) or max_images < 1:
+        raise ValueError("max_images must be a positive integer")
+    if not isinstance(max_dimension, int) or max_dimension < 0:
+        raise ValueError("max_dimension must be 0 (full size) or a positive integer")
 
     # Validate path
     file_path = validate_file_path(file_path_str)
 
-    logger.info(f"Getting document images: {file_path} (page={page_filter}, max={max_images})")
+    logger.info(
+        f"Getting document images: {file_path} "
+        f"(page={page_filter}, id={image_id}, max={max_images})"
+    )
 
     # Get extractor
     extractor = get_extractor_for_file(file_path)
@@ -43,9 +54,8 @@ async def handle_get_document_images(arguments: dict[str, Any]) -> list[TextCont
     # Extract raw document
     raw_doc = extractor.extract(str(file_path))
 
-    # Get all images first to count total
-    all_images = extract_images_from_structure(raw_doc.structure)
-    total_images = len(all_images)
+    # Count without decoding anything; only returned images are encoded.
+    total_images = count_images_in_structure(raw_doc.structure)
 
     if total_images == 0:
         return [TextContent(
@@ -58,12 +68,15 @@ async def handle_get_document_images(arguments: dict[str, Any]) -> list[TextCont
             }, indent=2)
         )]
 
-    # Get filtered images
     images = extract_images_from_structure(
         raw_doc.structure,
         page_filter=page_filter,
-        max_images=max_images
+        max_images=max_images,
+        max_dimension=max_dimension or None,
+        image_id=image_id,
     )
+    if image_id is not None and not images:
+        raise ValueError(f"No image with id '{image_id}' in {file_path.name}")
 
     # Build response
     response_items: list[TextContent | ImageContent] = []
@@ -77,11 +90,14 @@ async def handle_get_document_images(arguments: dict[str, Any]) -> list[TextCont
         "max_images": max_images
     }
 
-    if len(images) < total_images:
+    if image_id is None and len(images) < total_images:
         if page_filter:
             summary["note"] = f"Showing images from page {page_filter} only"
         else:
-            summary["note"] = f"Showing first {len(images)} of {total_images} images"
+            summary["note"] = (
+                f"Showing first {len(images)} of {total_images} images. "
+                "Use page, image_id or a larger max_images for others."
+            )
 
     response_items.append(TextContent(type="text", text=json.dumps(summary, indent=2)))
 
@@ -95,10 +111,17 @@ async def handle_get_document_images(arguments: dict[str, Any]) -> list[TextCont
         # Position info as TextContent
         position_info = {
             "image_index": idx + 1,
+            "id": img.get("id"),
             "page": page_num,
             "dimensions": f"{width}x{height}",
             "position": position
         }
+        if (img.get("original_width"), img.get("original_height")) != (width, height):
+            position_info["original_dimensions"] = (
+                f"{img.get('original_width')}x{img.get('original_height')}"
+            )
+        if img.get("alt"):
+            position_info["alt"] = img["alt"]
         response_items.append(TextContent(
             type="text",
             text=f"Image {idx + 1}: {json.dumps(position_info)}"

@@ -530,7 +530,9 @@ def extract_metadata(file_path: str | Path) -> MetadataResult:
         text = text.get('text', str(text))
 
     # Count images
-    image_count = len(_collect_images(raw_doc))
+    from src.extractors.image_utils import count_images
+
+    image_count = count_images(getattr(raw_doc, "structure", None))
 
     return MetadataResult(
         file_path=str(path),

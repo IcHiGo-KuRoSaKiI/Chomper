@@ -16,6 +16,7 @@ from src.server.config import (
 )
 from src.server.helpers import (
     detect_mime_type,
+    count_images_in_structure,
     extract_images_from_structure,
     get_extractor_for_file,
     parse_from_base64,
@@ -67,7 +68,7 @@ async def handle_parse_document(arguments: dict[str, Any]) -> list[TextContent |
     page_count = None
     if extension == ".pdf" and raw_doc.structure:
         page_count = len(raw_doc.structure.get("pages", []))
-    image_count = len(extract_images_from_structure(raw_doc.structure))
+    image_count = count_images_in_structure(raw_doc.structure)
 
     # Determine text to return
     if full_text or total_chars <= DEFAULT_SUMMARY_CHARS:
@@ -171,7 +172,7 @@ async def handle_parse_document(arguments: dict[str, Any]) -> list[TextContent |
                 ))
 
         # Note if there are more images
-        total_images = len(extract_images_from_structure(raw_doc.structure))
+        total_images = image_count
         if total_images > len(images):
             if output_format == OUTPUT_FORMAT_TOON:
                 response_items.append(TextContent(

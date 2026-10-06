@@ -4,6 +4,8 @@ PDF extractor using PyMuPDF and PyMuPDF4LLM.
 Extracts text (with proper Markdown formatting including tables),
 images, and layout from PDF documents.
 """
+import functools
+import hashlib
 import logging
 from typing import Any
 
@@ -11,7 +13,7 @@ import fitz
 
 from ..models.document import RawDocument
 from .base import BaseExtractor
-from .image_utils import image_record
+from .image_utils import image_marker, image_record
 
 # Try to import pymupdf4llm for better markdown output
 try:
@@ -232,7 +234,11 @@ class PDFExtractor(BaseExtractor):
 
     def _extract_page_images(self, pdf_document, page_idx: int) -> list[dict[str, Any]]:
         """
-        Extract images from a specific page.
+        Lazy image records for one page, in reading order (top to bottom).
+
+        Nothing is decoded here: width and height come from the image table,
+        and the bytes are loaded from the file only if the image is requested.
+        Ids are ``p<page>-<n>``; the same id appears in the text marker.
 
         Args:
             pdf_document: fitz PDF document
@@ -241,37 +247,43 @@ class PDFExtractor(BaseExtractor):
         Returns:
             List of image content items
         """
-        images = []
         page = pdf_document[page_idx]
+        file_path = pdf_document.name
+        placed = []
 
-        image_list = page.get_images(full=True)
-        if image_list:
-            logger.debug(f"Found {len(image_list)} images on page {page_idx + 1}")
-
-        for img_index, img in enumerate(image_list):
-            try:
-                xref = img[0]
-                masks = page.get_image_rects(xref)
-
-                if not masks:
-                    continue
-
-                base_image = pdf_document.extract_image(xref)
-                mask = masks[0]
-                record = image_record(
-                    self._image_bytes(pdf_document, xref, base_image),
-                    self.min_image_width,
-                    self.min_image_height,
-                    page=page_idx + 1,
-                    position={"x0": mask.x0, "y0": mask.y0, "x1": mask.x1, "y1": mask.y1},
-                )
-                if record:
-                    images.append(record)
-
-            except Exception as e:
-                logger.warning(f"Failed to extract image {img_index + 1} from page {page_idx + 1}: {e}")
+        for img in page.get_images(full=True):
+            xref, width, height = img[0], img[2], img[3]
+            if width < self.min_image_width or height < self.min_image_height:
                 continue
+            try:
+                rects = page.get_image_rects(xref)
+                if not rects:
+                    continue
+                try:
+                    key = hashlib.sha1(pdf_document.xref_stream_raw(xref) or b"").hexdigest()
+                except Exception:
+                    key = f"xref-{xref}"
+                for rect in rects:
+                    if rect.is_empty or rect.is_infinite:
+                        continue
+                    placed.append((rect, xref, width, height, key))
+            except Exception as e:
+                logger.warning(f"Failed to read image xref {xref} on page {page_idx + 1}: {e}")
 
+        placed.sort(key=lambda item: (round(item[0].y0), item[0].x0))
+        images = []
+        for n, (rect, xref, width, height, key) in enumerate(placed, start=1):
+            record = image_record(
+                loader=functools.partial(_load_pdf_image, file_path, xref),
+                width=width,
+                height=height,
+                key=key,
+                id=f"p{page_idx + 1}-{n}",
+                page=page_idx + 1,
+                position={"x0": rect.x0, "y0": rect.y0, "x1": rect.x1, "y1": rect.y1},
+            )
+            if record:
+                images.append(record)
         return images
 
     @staticmethod
@@ -390,7 +402,7 @@ class PDFExtractor(BaseExtractor):
             if item["type"] == "text":
                 text_parts.append(item["content"])
             elif item["type"] == "image":
-                text_parts.append(f"[Image: {item['width']}x{item['height']}]")
+                text_parts.append(image_marker(item["id"]))
 
         return "\n".join(text_parts)
 
@@ -416,3 +428,10 @@ class PDFExtractor(BaseExtractor):
             "format": "pdf",
             "extraction_method": "pymupdf4llm" if self.use_markdown else "pymupdf"
         }
+
+
+def _load_pdf_image(file_path: str, xref: int) -> bytes:
+    """Bytes for one image, read from the file when a caller asks for it."""
+    with fitz.open(file_path) as pdf_document:
+        base_image = pdf_document.extract_image(xref)
+        return PDFExtractor._image_bytes(pdf_document, xref, base_image)

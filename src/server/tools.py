@@ -58,13 +58,15 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="get_document_images",
-            description="Retrieve images from a document on-demand. Returns images as ImageContent objects. Use this instead of include_images=true on parse_document for better control.",
+            description="Retrieve images from a document on-demand as ImageContent, each preceded by its id, page and position. Parsed text marks where each image sits as ![caption](image:<id>); pass that id as image_id to fetch one figure. Filter by page, cap with max_images.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "file_path": {"type": "string", "description": "Absolute path to the document file"},
                     "page": {"type": "integer", "description": "Specific page number to get images from (1-indexed). Default: all pages."},
-                    "max_images": {"type": "integer", "default": 5, "description": "Maximum number of images to return (default: 5)"}
+                    "max_images": {"type": "integer", "default": 5, "description": "Maximum number of images to return (default: 5)"},
+                    "image_id": {"type": "string", "description": "Return only this image: the id in a text marker like ![Figure 2](image:p3-1)."},
+                    "max_dimension": {"type": "integer", "default": 1568, "description": "Downscale so the longest edge is at most this many pixels (default 1568, what vision models use). 0 returns full resolution."}
                 },
                 "required": ["file_path"]
             }

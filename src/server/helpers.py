@@ -10,7 +10,12 @@ from typing import Any
 
 from mcp.types import TextContent
 
-from ..extractors.image_utils import collect_images, detect_mime_type  # noqa: F401
+from ..extractors.image_utils import (  # noqa: F401
+    DEFAULT_MAX_DIMENSION,
+    collect_images,
+    count_images,
+    detect_mime_type,
+)
 from .config import CHUNKERS, EXTRACTORS
 
 
@@ -143,49 +148,63 @@ def get_chunker_for_file(
 def extract_images_from_structure(
     structure: dict[str, Any] | None,
     page_filter: int | None = None,
-    max_images: int | None = None
+    max_images: int | None = None,
+    max_dimension: int | None = DEFAULT_MAX_DIMENSION,
+    image_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """
-    Extract images from any document structure (PDF pages, PPTX slides,
-    DOCX sections, or a flat top-level list).
+    Images from any document structure (PDF pages, PPTX slides, DOCX sections,
+    or a flat top-level list), decoded and encoded only for those returned.
 
     Args:
         structure: Document structure from extraction
         page_filter: If set, only return images from this page/slide (1-indexed)
         max_images: Maximum number of images to return
+        max_dimension: Downscale so the long edge is at most this; 0 keeps full size
+        image_id: Only the image whose marker in the text is ``![...](image:<id>)``
 
     Returns:
-        List of image dictionaries with page, pages, base64, mime_type,
+        List of image dictionaries with id, page, pages, base64, mime_type,
         width, height, position. Identical images (a logo on every page) are
         returned once, with ``pages`` listing every page they appear on.
     """
     return [
         {
+            "id": img.get("id"),
             "page": img.get("page"),
             "pages": img.get("pages", [img.get("page")]),
             "base64": img["content"],
             "mime_type": img["mime_type"],
             "width": img.get("width", 0),
             "height": img.get("height", 0),
+            "original_width": img.get("original_width", img.get("width", 0)),
+            "original_height": img.get("original_height", img.get("height", 0)),
             "position": img.get("position", {}),
+            **({"alt": img["alt"]} if img.get("alt") else {}),
         }
-        for img in collect_images(structure, page_filter=page_filter, max_images=max_images)
+        for img in collect_images(
+            structure,
+            page_filter=page_filter,
+            max_images=max_images,
+            max_dimension=max_dimension,
+            image_id=image_id,
+        )
     ]
+
+
+def count_images_in_structure(structure: dict[str, Any] | None, page_filter: int | None = None) -> int:
+    """Number of (de-duplicated) images, without decoding any of them."""
+    return count_images(structure, page_filter=page_filter)
 
 
 def remove_image_placeholders(text: str) -> str:
     """
-    Remove [Image: WxH] placeholders from text.
+    Remove legacy ``[Image: WxH]`` placeholders from text.
 
-    Args:
-        text: Text containing image placeholders
-
-    Returns:
-        Text with placeholders removed
+    The ``![alt](image:<id>)`` markers are kept: they tell the reader where a
+    figure sits and which id to pass to ``get_document_images``.
     """
-    # Remove patterns like [Image: 800x600], [Image: 1024x768], etc.
-    pattern = r'\[Image:\s*\d+x\d+\]\s*'
-    return re.sub(pattern, '', text)
+    return re.sub(r'\[Image:\s*\d+x\d+\]\s*', '', text)
 
 
 def format_error_response(error: Exception) -> list[TextContent]:

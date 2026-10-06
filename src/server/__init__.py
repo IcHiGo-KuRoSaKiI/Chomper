@@ -17,6 +17,7 @@ from .config import (
 from .helpers import (
     chunk_to_dict,
     detect_mime_type,
+    count_images_in_structure,
     extract_images_from_structure,
     format_error_response,
     get_chunker_for_file,
@@ -43,6 +44,7 @@ __all__ = [
     "parse_from_base64",
     "get_extractor_for_file",
     "get_chunker_for_file",
+    "count_images_in_structure",
     "extract_images_from_structure",
     "remove_image_placeholders",
     "detect_mime_type",
