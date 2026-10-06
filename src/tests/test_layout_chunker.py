@@ -85,10 +85,26 @@ def test_offsets_point_into_parse_text_and_pages_are_tracked() -> None:
 
 
 def test_level_two_headings_always_start_a_chunk() -> None:
-    doc = doc_from_pages([f"# A\n\n{prose(2)}\n\n## B\n\n{prose(2)}\n\n### C\n\n{prose(2)}"])
+    doc = doc_from_pages([f"# A\n\n{prose(8)}\n\n## B\n\n{prose(8)}\n\n### C\n\n{prose(8)}"])
     chunks = chunk(doc, size=500)
     assert [c.text.split("\n", 1)[0] for c in chunks] == ["# A", "## B"]
     assert "### C" in chunks[1].text  # level 3 is a preferred, not a forced, cut
+
+
+def test_tiny_sections_merge_into_the_next() -> None:
+    doc = doc_from_pages([f"ACME LTD.\n\n# Report\n\n{prose(8)}\n\n## Part\n\n{prose(8)}"])
+    chunks = chunk(doc, size=500)
+    assert [c.text.split("\n", 1)[0] for c in chunks] == ["ACME LTD.", "## Part"]
+    assert chunk(doc, size=40)[0].text == "ACME LTD."  # too big to merge: kept apart
+
+
+def test_heading_inside_a_sentence_is_not_a_cut() -> None:
+    doc = doc_from_pages([
+        f"# Box 4\n\n{prose(8)} All of the rules called for highly accommodative",
+        f"## Box 4 continued\n\nmonetary policy after the recession. {prose(8, 'Rule')}",
+    ])
+    chunks = chunk(doc, size=500)
+    assert len(chunks) == 1 and chunks[0].metadata["heading_path"] == "Box 4"
 
 
 # ------------------------------------------------------------------------ tables
@@ -240,3 +256,39 @@ def test_layout_chunks_of_a_real_pdf_index_parse_text(tmp_path: Path) -> None:
             assert text[c.start_char : c.end_char] == c.text
         assert c.metadata["heading_path"].startswith("Annual Review")
     assert any(c.section_name == "1. Operations" for c in chunks)
+
+
+# ------------------------------------------------------------ sentence-end check
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "A complete sentence.",
+        "This line was cut off in the middle of",
+        "Totals for the year 12 34",
+        "Short label",
+        "- a list item without a full stop",
+        "| a | b |",
+        "Introduces a list:",
+        "As described in Fig.",
+        "Ticks after a phrase that is long enough \u2713 \u2717",
+        "Ends with a year like 2024",
+    ],
+)
+def test_sentence_end_check_matches_pdf_structure(text: str) -> None:
+    from src.chunking.strategies.layout_pdf_chunker import ends_mid_sentence
+    from src.pdf_structure.sentences import ends_mid_sentence as reference
+
+    assert ends_mid_sentence(text) == reference(text)
+
+
+def test_sentence_end_check_is_linear_on_long_digit_runs() -> None:
+    import time
+
+    from src.chunking.strategies.layout_pdf_chunker import ends_mid_sentence
+
+    axis = "Axis labels " + "20192020202120222023" * 20 + " Percent"
+    start = time.perf_counter()
+    assert ends_mid_sentence(axis) is True
+    assert time.perf_counter() - start < 0.5

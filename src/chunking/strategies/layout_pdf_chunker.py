@@ -164,6 +164,35 @@ def running_head_lines(
     return sorted(found)
 
 
+def interrupting_headings(text: str) -> list[tuple[int, int]]:
+    """Heading lines that sit inside a sentence, e.g. ``## Box 4 —continued``.
+
+    The prose before the heading ends mid-sentence and the prose after it starts
+    with a lowercase letter: the heading is a continuation label (or a reading-order
+    artefact), not the start of a section.
+    """
+    found: list[tuple[int, int]] = []
+    lines: list[tuple[int, int]] = []
+    pos = 0
+    for raw in text.split("\n"):
+        if raw.strip():
+            lines.append((pos, pos + len(raw)))
+        pos += len(raw) + 1
+    for i in range(1, len(lines) - 1):
+        start, end = lines[i]
+        if not text[start:end].lstrip().startswith("#"):
+            continue
+        before, after = text[lines[i - 1][0] : lines[i - 1][1]], text[lines[i + 1][0] : lines[i + 1][1]]
+        head = after.lstrip()
+        if (
+            head[:1].islower()
+            and not _STRUCTURAL_LINE_RE.match(after)
+            and prose_ends_mid_sentence(before)
+        ):
+            found.append((start, end))
+    return found
+
+
 def mask_spans(text: str, spans: list[tuple[int, int]]) -> str:
     """``text`` with each span blanked out (same length, so offsets still match)."""
     if not spans:
@@ -178,12 +207,55 @@ def mask_spans(text: str, spans: list[tuple[int, int]]) -> str:
     return "".join(parts)
 
 
-def prose_ends_mid_sentence(text: str) -> bool:
-    """:func:`~src.pdf_structure.sentences.ends_mid_sentence` on ``text`` with inline
-    markup removed, so ``... go to _<u>IRS.gov</u>_ <u>.</u>`` counts as finished.
-    """
-    from ...pdf_structure.sentences import ends_mid_sentence
+#: Bullet and tick glyphs ``ends_mid_sentence`` treats as trailing enumeration.
+_ENUM_GLYPHS = frozenset("\u2713\u2714\u2717\u2718\u25cb\u25cf\u2022")
 
+
+def ends_mid_sentence(text: str) -> bool:
+    """Linear-time equivalent of :func:`src.pdf_structure.sentences.ends_mid_sentence`.
+
+    The original strips trailing enumeration with
+    ``(?:[\\s\\u00a0]*(?:\\d{1,2}|<glyph>))+$``, which backtracks exponentially
+    on a long digit run (``2019202020212022...`` from chart axes) and can hang for
+    minutes. Anchored at the end, that pattern removes exactly the trailing run of
+    whitespace, digits and glyphs, which a right-strip does in linear time. Every
+    other step is the same.
+    """
+    from ...pdf_structure.sentences import ABBREVIATIONS
+
+    stripped = text.rstrip()
+    if not stripped:
+        return False
+    last = stripped.splitlines()[-1].strip()
+    if not last:
+        return False
+    if last.startswith(("|", "```", "#", ">")):
+        return False
+    if re.match(r"^\s*([-*+\u2022]|\d+[.)])\s", last):
+        return False
+    if last.endswith((":", ";")):
+        return False
+    end = len(last)
+    while end and (last[end - 1].isspace() or last[end - 1].isdecimal() or last[end - 1] in _ENUM_GLYPHS):
+        end -= 1
+    last = last[:end].rstrip()
+    if not last or last.endswith((":", ";")):
+        return False
+    if re.match(r"^[\d\s.,)(]+$", last):
+        return False
+    if len(last.split()) <= 3:
+        return False
+    if sum(1 for c in last if c.isalpha()) < 2:
+        return False
+    if last.endswith((".", "!", "?", '"', "'", ")", "]", "\u2026")):
+        return any(last.endswith(abbr) for abbr in ABBREVIATIONS)
+    return True
+
+
+def prose_ends_mid_sentence(text: str) -> bool:
+    """:func:`ends_mid_sentence` on ``text`` with inline markup removed, so
+    ``... go to _<u>IRS.gov</u>_ <u>.</u>`` counts as finished.
+    """
     tail = text.rstrip().rsplit("\n", 1)[-1]
     if _STRUCTURAL_LINE_RE.match(tail):
         return False
@@ -250,6 +322,8 @@ class LayoutPDFChunker(BaseChunker):
             sentences; never across a heading).
         preserve_context: kept for interface compatibility.
         section_level: deepest heading level that always starts a new chunk.
+        soft_min_words: a section shorter than this is merged into the next one
+            when both fit in one chunk (a title page line, a heading with one line).
     """
 
     def __init__(
@@ -259,9 +333,15 @@ class LayoutPDFChunker(BaseChunker):
         preserve_context: bool = True,
         *,
         section_level: int = 2,
+        soft_min_words: int = 40,
     ) -> None:
         super().__init__(target_size, overlap, preserve_context)
         self.section_level = section_level
+        self.soft_min_words = soft_min_words
+
+    def _sections(self, view: str, target: int) -> list[tuple[int, int]]:
+        sections = [(s, e) for s, e, _ in section_spans(view, self.section_level)]
+        return _merge_small_sections(view, sections, target, self.soft_min_words)
 
     def chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """Chunk ``raw_doc`` (a PDFExtractor result); offsets point into ``raw_doc.text``."""
@@ -275,11 +355,12 @@ class LayoutPDFChunker(BaseChunker):
         # blanked; chunk text always comes from ``text``.
         running = running_head_lines(text, spans)
         view = mask_spans(text, running)
+        view = mask_spans(view, interrupting_headings(view))
         index = HeadingIndex(view)
         method = (raw_doc.metadata or {}).get("extraction_method")
 
         chunks: list[Chunk] = []
-        for sec_start, sec_end, _heading in section_spans(view, self.section_level):
+        for sec_start, sec_end in self._sections(view, target):
             units = join_continuations(view, segment(view, target, sec_start, sec_end), target)
             units, decor = protect_units(view, units, target)
             for a, b in pack(units, target, over):
@@ -322,6 +403,28 @@ class LayoutPDFChunker(BaseChunker):
                     )
                 )
         return chunks
+
+
+def _words(text: str, start: int, end: int) -> int:
+    return len(text[start:end].split())
+
+
+def _merge_small_sections(
+    text: str, sections: list[tuple[int, int]], target: int, soft_min: int
+) -> list[tuple[int, int]]:
+    """Merge a section under ``soft_min`` words into the next while both fit ``target``."""
+    merged: list[tuple[int, int]] = []
+    for start, end in sections:
+        if merged:
+            prev_start, prev_end = merged[-1]
+            if (
+                _words(text, prev_start, prev_end) < soft_min
+                and _words(text, prev_start, end) <= target
+            ):
+                merged[-1] = (prev_start, end)
+                continue
+        merged.append((start, end))
+    return merged
 
 
 def _count_tables(body: str) -> int:
