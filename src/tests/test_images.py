@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-fitz = pytest.importorskip("fitz", reason="PyMuPDF required")
+fitz = pytest.importorskip("pymupdf", reason="PyMuPDF required")
 pptx = pytest.importorskip("pptx", reason="python-pptx required")
 docx = pytest.importorskip("docx", reason="python-docx required")
 from PIL import Image, ImageDraw  # noqa: E402

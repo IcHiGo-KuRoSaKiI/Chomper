@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 #: Caption openers. "Table 2" is included: a table rendered as a picture is a figure.
-_CAPTION = re.compile(
+CAPTION_RE = re.compile(
     r"^(fig(?:ure)?s?|chart|exhibit|graph|diagram|image|photo(?:graph)?|illustration|"
     r"plate|map|scheme|table|source|abbildung|figura)\.?\s*[\dIVXivx]+[a-z]?\b",
     re.IGNORECASE,
@@ -147,7 +147,7 @@ def _with_labels(
         for line in lines:
             lx0, ly0, lx1, ly1 = line.bbox
             text = line.text.strip()
-            if not text or len(text.split()) > max_words or _CAPTION.match(text):
+            if not text or len(text.split()) > max_words or CAPTION_RE.match(text):
                 continue
             near_x = lx1 >= x0 - margin and lx0 <= x1 + margin
             near_y = ly1 >= y0 - margin and ly0 <= y1 + margin
@@ -182,7 +182,7 @@ def find_caption(
         lx0, ly0, lx1, ly1 = line.bbox
         if lx1 <= x0 or lx0 >= x1:
             continue
-        if not _CAPTION.match(line.text.strip()):
+        if not CAPTION_RE.match(line.text.strip()):
             continue
         if any(_inside(line, other) for other in others):
             continue

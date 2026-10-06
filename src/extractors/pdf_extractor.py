@@ -11,7 +11,7 @@ import hashlib
 import logging
 from typing import Any
 
-import fitz
+import pymupdf as fitz
 
 from ..models.document import RawDocument
 from .base import BaseExtractor
@@ -50,6 +50,9 @@ class PDFExtractor(BaseExtractor):
         use_markdown: bool = True,
         table_strategy: str = 'lines_strict',
         extract_vector_figures: bool = True,
+        backend: str = "auto",
+        ocr: str = "auto",
+        table_format: str = "markdown",
     ):
         """
         Initialize PDF extractor.
@@ -62,6 +65,14 @@ class PDFExtractor(BaseExtractor):
             table_strategy: Table detection strategy for pymupdf4llm
             extract_vector_figures: Treat vector-drawn charts and diagrams as
                 figures (rendered on request) and mark them in the text
+            backend: ``layout`` (pymupdf-layout model; the default when
+                installed), or ``legacy`` (pymupdf4llm without the model plus a
+                second find_tables pass; much weaker tables, kept as fallback)
+            ocr: ``auto`` OCRs pages that have no text layer when an OCR engine
+                (Tesseract, RapidOCR) is installed; ``off``; ``force`` every page.
+                Layout backend only.
+            table_format: ``markdown`` pipe tables or ``html`` (keeps merged
+                cells). Layout backend only.
         """
         self.min_image_width = min_image_width
         self.min_image_height = min_image_height
@@ -69,7 +80,21 @@ class PDFExtractor(BaseExtractor):
         self.use_markdown = use_markdown and PYMUPDF4LLM_AVAILABLE
         self.table_strategy = table_strategy
         self.extract_vector_figures = extract_vector_figures
+        from .pdf_layout import LAYOUT_AVAILABLE, OCR_MODES
+
+        if backend not in ("auto", "layout", "legacy"):
+            raise ValueError(f"backend must be 'auto', 'layout' or 'legacy', not {backend!r}")
+        if ocr not in OCR_MODES:
+            raise ValueError(f"ocr must be one of {', '.join(OCR_MODES)}, not {ocr!r}")
+        if table_format not in ("markdown", "html"):
+            raise ValueError(f"table_format must be 'markdown' or 'html', not {table_format!r}")
+        if backend == "layout" and not LAYOUT_AVAILABLE:
+            raise ValueError("backend='layout' needs pymupdf-layout: pip install pymupdf-layout")
+        self.backend = "layout" if backend != "legacy" and LAYOUT_AVAILABLE else "legacy"
+        self.ocr = ocr
+        self.table_format = table_format
         self._pages_without_text: list[int] = []
+        self._ocr_pages: list[int] = []
 
         if use_markdown and not PYMUPDF4LLM_AVAILABLE:
             logger.warning(
@@ -93,7 +118,10 @@ class PDFExtractor(BaseExtractor):
         pdf_document = fitz.open(file_path)
 
         # Extract text using appropriate method
-        if self.use_markdown:
+        self._pages_without_text, self._ocr_pages = [], []
+        if self.use_markdown and self.backend == "layout":
+            full_text, pages = self._extract_with_layout(file_path, pdf_document)
+        elif self.use_markdown:
             full_text, pages = self._extract_with_markdown(file_path, pdf_document)
         else:
             pages = self._extract_pages(pdf_document)
@@ -124,6 +152,8 @@ class PDFExtractor(BaseExtractor):
             logger.warning("%s: %s", file_path, warning)
         if without_text:
             metadata["pages_without_text_layer"] = without_text
+        if self._ocr_pages:
+            metadata["ocr_pages"] = list(self._ocr_pages)
 
         pdf_document.close()
 
@@ -144,6 +174,44 @@ class PDFExtractor(BaseExtractor):
             metadata=metadata,
             structure={"pages": pages, "images": images}
         )
+
+    def _extract_with_layout(self, file_path: str, pdf_document) -> tuple:
+        """Markdown, figures and scanned-page handling from the layout model."""
+        from .pdf_layout import extract_with_layout
+
+        rasters = [self._extract_page_images(pdf_document, i) for i in range(len(pdf_document))]
+        result = extract_with_layout(
+            pdf_document,
+            file_path,
+            rasters=rasters,
+            page_lines=_page_lines,
+            render_loader=_render_pdf_region,
+            ocr=self.ocr,
+            table_format=self.table_format,
+            vector_figures=self.extract_vector_figures,
+        )
+        self._pages_without_text = result.pages_without_text
+        self._ocr_pages = result.ocr_pages
+
+        pages = []
+        for index, layout_page in enumerate(result.pages):
+            rect = pdf_document[index].rect
+            content: list[dict[str, Any]] = []
+            if layout_page.text.strip():
+                content.append({
+                    "type": "text",
+                    "content": layout_page.text,
+                    "format": "markdown",
+                    "position": {"x0": rect.x0, "y0": rect.y0, "x1": rect.x1, "y1": rect.y1},
+                })
+            content.extend(layout_page.figures)
+            pages.append({
+                "page_number": index + 1,
+                "content": content,
+                "markdown_text": layout_page.text,
+            })
+        full_text = "\n\n".join(page.text.strip("\n") for page in result.pages if page.text.strip())
+        return full_text, pages
 
     def _extract_with_markdown(self, file_path: str, pdf_document) -> tuple:
         """
@@ -573,7 +641,10 @@ class PDFExtractor(BaseExtractor):
             "producer": metadata.get("producer", ""),
             "page_count": len(pdf_document),
             "format": "pdf",
-            "extraction_method": "pymupdf4llm" if self.use_markdown else "pymupdf"
+            "extraction_method": (
+                ("pymupdf-layout" if self.backend == "layout" else "pymupdf4llm")
+                if self.use_markdown else "pymupdf"
+            ),
         }
 
 

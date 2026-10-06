@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-fitz = pytest.importorskip("fitz", reason="PyMuPDF required")
+fitz = pytest.importorskip("pymupdf", reason="PyMuPDF required")
 
 from src.pdf_structure import parse_structure  # noqa: E402
 from src.pdf_structure.headings import build_tiers, detect_headings  # noqa: E402
@@ -49,6 +49,7 @@ from src.pdf_structure.tables import (  # noqa: E402
     TableRegion,
     inherit_continuation_headers,
     markdown_table_blocks,
+    render_markdown_table,
     table_row_count,
     table_to_markdown,
 )
@@ -558,18 +559,16 @@ class TestTables:
         ]
         _write_reportlab_table(path, rows)
 
-        # The legacy pymupdf4llm backend changes this process-global PyMuPDF
-        # setting at import time. Recreate that state so this regression remains
-        # deterministic regardless of test order.
+        # Recreate the process-global PyMuPDF states that broke cell text: the
+        # legacy pymupdf4llm disabled quad corrections at import, and importing
+        # pymupdf.layout (pymupdf4llm >= 1.28) makes Table.extract() drop spaces
+        # and split "1.42m" into "142m\n.". Cells must come out verbatim anyway.
+        pytest.importorskip("pymupdf.layout")
         fitz.TOOLS.unset_quad_corrections(True)
         result = parse_structure(path, max_words=10)
-
         fitz.TOOLS.unset_quad_corrections(False)
-        with fitz.open(path) as document:
-            extracted = document[0].find_tables().tables[0]
-            assert extracted.extract() == rows
-            expected = table_to_markdown(extracted)
 
+        expected = render_markdown_table(tuple(rows[0]), tuple(map(tuple, rows[1:])), 3)
         table_blocks = [block.text for block in result.blocks if block.contains_table]
         assert any(expected in text for text in table_blocks)
 

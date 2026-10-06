@@ -25,7 +25,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
 try:
-    import fitz  # PyMuPDF
+    import pymupdf as fitz  # PyMuPDF
 except ImportError:  # pragma: no cover
     raise SystemExit("PyMuPDF required:  pip install pymupdf")
 

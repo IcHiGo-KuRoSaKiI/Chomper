@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 try:
-    import fitz  # PyMuPDF
+    import pymupdf as fitz  # PyMuPDF
     FITZ_AVAILABLE = True
 except ImportError:  # pragma: no cover
     FITZ_AVAILABLE = False

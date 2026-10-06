@@ -250,11 +250,11 @@ def test_runtime_dependencies_have_compatible_upper_bounds():
     requirements = (root / "requirements.txt").read_text(encoding="utf-8")
 
     assert pyproject.count('"mcp>=1.25,<2"') == 2
-    assert '"pymupdf>=1.26.7,<1.27"' in pyproject
-    assert '"pymupdf4llm>=0.2.9,<0.3"' in pyproject
+    # The layout model ships in lockstep with PyMuPDF; mismatched versions break it.
+    for package in ("pymupdf", "pymupdf4llm", "pymupdf-layout"):
+        assert f'"{package}==1.28.2"' in pyproject
+        assert f"{package}==1.28.2" in requirements
     assert "mcp>=1.25,<2" in requirements
-    assert "pymupdf>=1.26.7,<1.27" in requirements
-    assert "pymupdf4llm>=0.2.9,<0.3" in requirements
 
 
 def main():

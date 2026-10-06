@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-fitz = pytest.importorskip("fitz", reason="PyMuPDF required")
+fitz = pytest.importorskip("pymupdf", reason="PyMuPDF required")
 
 import chomper  # noqa: E402
 from src.pdf_structure.lists import normalize_markdown_lists, parse_marker  # noqa: E402

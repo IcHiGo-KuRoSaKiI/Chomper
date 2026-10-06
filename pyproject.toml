@@ -39,13 +39,15 @@ classifiers = [
 dependencies = [
     "mcp>=1.25,<2",
     # Core parsing dependencies
-    "pymupdf>=1.26.7,<1.27",     # PDF extraction
-    "pymupdf4llm>=0.2.9,<0.3",  # LLM-optimized Markdown output
+    # PDF: one layout-model pass (pymupdf-layout) for text, headings, lists, tables
+    # and figures. The three are released together and must match exactly.
+    "pymupdf==1.28.2",
+    "pymupdf4llm==1.28.2",
+    "pymupdf-layout==1.28.2",
     "python-docx>=1.1.0",        # DOCX extraction
     "python-pptx>=0.6.23",       # PPTX extraction
     "openpyxl>=3.1.2",           # Excel extraction
     "beautifulsoup4>=4.12.0",    # HTML extraction
-    "trafilatura>=1.6.0",        # HTML article extraction
     "lxml>=5.0.0",               # XML/HTML parsing
     "pillow>=10.1.0",            # Image probing/normalisation (imported unconditionally)
 ]
@@ -70,6 +72,7 @@ dev = [
     "chomper[all]",
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
+    "reportlab>=4.0",            # builds PDF fixtures in tests
     "black>=23.0.0",
     "ruff>=0.1.0",
     "mypy>=1.5.0",

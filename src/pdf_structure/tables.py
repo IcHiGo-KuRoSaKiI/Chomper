@@ -46,19 +46,80 @@ class TableRegion:
         return render_markdown_table(self.header, self.data_rows, self.cols)
 
 
+def _page_words(page: Any) -> list[tuple]:
+    """Words on a page, computed once per page object."""
+    cached = getattr(page, "_chomper_words", None)
+    if cached is None:
+        cached = page.get_text("words", sort=True)
+        try:
+            page._chomper_words = cached
+        except AttributeError:  # pragma: no cover - slotted page objects
+            pass
+    return cached
+
+
+def _cell_text(words: list[tuple], bbox: Any) -> str:
+    """Text of the words whose centre lies in ``bbox``, one line per text line."""
+    x0, y0, x1, y1 = bbox
+    lines: dict[tuple[int, int], list[tuple[float, str]]] = {}
+    order: list[tuple[int, int]] = []
+    for word in words:
+        cx, cy = (word[0] + word[2]) / 2, (word[1] + word[3]) / 2
+        if x0 <= cx <= x1 and y0 <= cy <= y1:
+            key = (word[5], word[6])
+            if key not in lines:
+                lines[key] = []
+                order.append(key)
+            lines[key].append((word[0], word[4]))
+    return "\n".join(" ".join(t for _, t in sorted(lines[key])) for key in order)
+
+
+def _cells_from_words(table: Any, rows: Any) -> tuple[tuple[str, ...], ...] | None:
+    """Cell text rebuilt from page words, or ``None`` if geometry is unavailable.
+
+    ``Table.extract()`` depends on process-wide PyMuPDF state: once
+    ``pymupdf.layout`` has been imported (``pymupdf4llm`` does it) it drops the
+    spaces between words and splits ``1.42m`` into ``142m\\n.``. The cell
+    boxes stay right, and plain word extraction is unaffected, so the text is
+    taken from the words inside each cell box instead.
+    """
+    page = getattr(table, "page", None)
+    if page is None or not rows:
+        return None
+    words = _page_words(page)
+    out = []
+    for row in rows:
+        cells = getattr(row, "cells", None)
+        if cells is None:
+            return None
+        out.append(tuple("" if cell is None else _cell_text(words, cell) for cell in cells))
+    return tuple(out)
+
+
 def extract_table_data(
     table: Any,
 ) -> tuple[tuple[str, ...], tuple[tuple[str, ...], ...], int, bool]:
     """Extract a PyMuPDF table into header, body, width and header provenance."""
-    extracted = tuple(
-        tuple("" if cell is None else str(cell) for cell in row)
-        for row in (table.extract() or ())
-    )
+    extracted = _cells_from_words(table, getattr(table, "rows", None))
+    if extracted is None:
+        extracted = tuple(
+            tuple("" if cell is None else str(cell) for cell in row)
+            for row in (table.extract() or ())
+        )
     header_object = getattr(table, "header", None)
-    header_names = tuple(
-        "" if cell is None else str(cell)
-        for cell in (getattr(header_object, "names", None) or ())
-    )
+    header_cells = getattr(header_object, "cells", None)
+    page = getattr(table, "page", None)
+    if header_cells and page is not None and getattr(header_object, "external", False):
+        words = _page_words(page)
+        header_names = tuple("" if c is None else _cell_text(words, c) for c in header_cells)
+    else:
+        header_names = tuple(
+            "" if cell is None else str(cell)
+            for cell in (getattr(header_object, "names", None) or ())
+        )
+        if header_names and not getattr(header_object, "external", False) and extracted:
+            # An internal header is the first row; use its rebuilt text.
+            header_names = extracted[0]
     header_external = bool(getattr(header_object, "external", False))
     columns = max(
         int(getattr(table, "col_count", 0) or 0),
