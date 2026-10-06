@@ -151,7 +151,8 @@ class DocumentPipeline:
         Returns:
             List of enriched chunks
         """
-        enriched = chunks
+        # Enrichers accept Chunks and return EnrichedChunks (a Chunk subclass).
+        enriched: list[Any] = list(chunks)
 
         for enricher in self.enrichers:
             enriched = enricher.enrich(enriched)

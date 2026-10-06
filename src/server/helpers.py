@@ -64,6 +64,57 @@ def int_arg(
     return value
 
 
+_JSON_TYPES: dict[str, tuple[type, ...]] = {
+    "string": (str,),
+    "integer": (int,),
+    "boolean": (bool,),
+    "array": (list,),
+    "object": (dict,),
+}
+
+
+def validate_arguments(schema: dict[str, Any], arguments: dict[str, Any]) -> None:
+    """Check tool arguments against the tool's input schema (top level).
+
+    Unlike a generic JSON-schema error ("-3 is less than the minimum of 0"), each
+    message names the argument and the accepted values.
+
+    Raises:
+        ValueError: missing required argument, wrong type, or out-of-range value.
+    """
+    properties: dict[str, Any] = schema.get("properties", {})
+    for name in schema.get("required", []):
+        if arguments.get(name) in (None, ""):
+            desc = properties.get(name, {}).get("description", "")
+            raise ValueError(f"{name} is required. {desc}".strip())
+    for name, value in arguments.items():
+        spec = properties.get(name)
+        if spec is None or value is None:
+            continue
+        expected = spec.get("type")
+        types = _JSON_TYPES.get(expected or "")
+        is_bool = isinstance(value, bool)
+        if types and (not isinstance(value, types) or (expected == "integer" and is_bool)):
+            raise ValueError(f"{name} must be a{'n' if expected in ('integer', 'array', 'object') else ''} "
+                             f"{expected}, got {value!r}.")
+        if "enum" in spec and value not in spec["enum"]:
+            raise ValueError(f"{name} must be one of {spec['enum']}, got {value!r}.")
+        if "minimum" in spec and isinstance(value, int) and value < spec["minimum"]:
+            raise ValueError(f"{name} must be >= {spec['minimum']}, got {value}.")
+        if "maxLength" in spec and isinstance(value, str) and len(value) > spec["maxLength"]:
+            raise ValueError(
+                f"{name} is too long ({len(value)} characters, limit {spec['maxLength']})."
+            )
+        if expected == "array":
+            if "minItems" in spec and len(value) < spec["minItems"]:
+                raise ValueError(f"{name} must have at least {spec['minItems']} item(s).")
+            if "maxItems" in spec and len(value) > spec["maxItems"]:
+                raise ValueError(
+                    f"{name} has {len(value)} items; the limit is {spec['maxItems']}. "
+                    "Split the request into several calls."
+                )
+
+
 def validate_file_path(file_path: str | None) -> Path:
     """
     Validate and return absolute path.

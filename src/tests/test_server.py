@@ -102,13 +102,15 @@ def write(tmp_path: Path, name: str, text: str) -> Path:
         ("get_document_chunk", {"offset": -1}, "offset must be >= 0"),
         ("get_document_chunk", {"limit": 0}, "limit must be >= 1"),
         ("get_document_chunk", {"offset": 10_000}, "past the end"),
-        ("get_document_images", {"max_images": 0}, "max_images must be a positive integer"),
+        ("get_document_images", {"max_images": 0}, "max_images must be >= 1"),
+        ("get_document_images", {"page": "two"}, "page must be an integer"),
+        ("parse_document", {"file_path": "/x.txt", "full_text": "yes"}, "full_text must be a boolean"),
         ("parse_document_chunked", {"chunking_strategy": "bogus"}, "recursive"),
         ("parse_document_chunked", {"chunk_size": 0}, "chunk_size must be >= 1"),
         ("parse_document_chunked", {"overlap": -5}, "overlap must be >= 0"),
         ("parse_document_bytes", {"content_base64": "!!!", "filename": "a.txt"}, "Invalid base64"),
         ("parse_document_bytes", {"content_base64": "aGk=", "filename": "a.xyz"}, "Unsupported"),
-        ("batch_parse", {"file_paths": []}, "non-empty array"),
+        ("batch_parse", {"file_paths": []}, "file_paths must have at least 1 item"),
         ("no_such_tool", {}, "Unknown tool"),
     ],
 )
@@ -345,3 +347,34 @@ def test_list_supported_formats_counts_only_available(tmp_path: Path) -> None:
     assert payload["available_formats"] == len(available)
     assert all(f["reason"] is None for f in available)
     assert isinstance(call("list_supported_formats", {})[0], TextContent)
+
+
+def test_errors_reach_a_real_mcp_client_as_is_error(tmp_path: Path) -> None:
+    """End to end over stdio: the SDK client sees isError=True, and success is not."""
+    import os
+
+    from mcp import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+
+    doc = write(tmp_path, "ok.txt", "hello over stdio")
+    params = StdioServerParameters(
+        command=sys.executable, args=[str(ROOT / "server.py")], cwd=str(ROOT),
+        env={**os.environ, "PYTHONPATH": str(ROOT)},
+    )
+
+    async def session() -> tuple[Any, Any, Any]:
+        with open(os.devnull, "w") as devnull:
+            async with stdio_client(params, errlog=devnull) as (read, write_stream):
+                async with ClientSession(read, write_stream) as client:
+                    await client.initialize()
+                    missing = await client.call_tool("parse_document", {"file_path": "/nope.pdf"})
+                    bad = await client.call_tool(
+                        "get_document_chunk", {"file_path": str(doc), "offset": -3}
+                    )
+                    good = await client.call_tool("parse_document", {"file_path": str(doc)})
+                    return missing, bad, good
+
+    missing, bad, good = asyncio.run(session())
+    assert missing.isError and "File not found" in missing.content[0].text
+    assert bad.isError and "offset must be >= 0" in bad.content[0].text
+    assert not good.isError and good.content[0].text == "hello over stdio"

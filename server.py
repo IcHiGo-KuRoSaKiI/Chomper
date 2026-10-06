@@ -62,7 +62,11 @@ from src.handlers import (  # noqa: E402
 from src.prompts import PROMPTS, format_prompt  # noqa: E402
 from src.server.config import EXTRACTORS  # noqa: E402
 from src.server.documents import load_document  # noqa: E402
-from src.server.helpers import run_blocking, validate_file_path  # noqa: E402
+from src.server.helpers import (  # noqa: E402
+    run_blocking,
+    validate_arguments,
+    validate_file_path,
+)
 from src.server.tools import get_tools  # noqa: E402
 
 # Configure logging
@@ -166,6 +170,9 @@ TOOL_HANDLERS: dict[str, ToolHandler] = {
     "batch_parse": handle_batch_parse,
 }
 
+#: Input schemas by tool name, checked by dispatch_tool (see validate_arguments).
+_TOOL_SCHEMAS: dict[str, dict[str, Any]] = {tool.name: tool.inputSchema for tool in get_tools()}
+
 
 def tool_error(tool: str, error: Exception) -> CallToolResult:
     """A tool failure the client can see as one: ``isError=True`` plus a message
@@ -189,7 +196,9 @@ async def dispatch_tool(
             ValueError(f"Unknown tool: {name}. Available tools: {', '.join(TOOL_HANDLERS)}."),
         )
     try:
-        return await handler(arguments or {})
+        arguments = arguments or {}
+        validate_arguments(_TOOL_SCHEMAS[name], arguments)
+        return await handler(arguments)
     except (ValueError, TypeError, FileNotFoundError, PermissionError, ImportError) as e:
         logger.warning("Tool %s rejected the request: %s", name, e)
         return tool_error(name, e)
@@ -198,7 +207,7 @@ async def dispatch_tool(
         return tool_error(name, e)
 
 
-@server.call_tool()
+@server.call_tool(validate_input=False)  # handlers validate, with actionable messages
 async def call_tool(
     name: str, arguments: dict[str, Any]
 ) -> Sequence[TextContent | ImageContent] | CallToolResult:
