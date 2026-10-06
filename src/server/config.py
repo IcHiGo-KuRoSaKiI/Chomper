@@ -27,7 +27,17 @@ DEFAULT_CHUNK_SIZE = 1000
 DEFAULT_CHUNK_OVERLAP = 100
 DEFAULT_CHUNK_STRATEGY = "auto"
 #: Strategy names accepted by the library, the CLI and the MCP server alike.
-CHUNK_STRATEGIES: tuple[str, ...] = ("auto", "semantic", "fixed", "recursive")
+#: ``layout`` chunks a PDF's layout-model Markdown (other formats: same as ``auto``).
+CHUNK_STRATEGIES: tuple[str, ...] = ("auto", "semantic", "fixed", "recursive", "layout")
+
+# PDF extraction options (PDFExtractor ``ocr`` / ``table_format``; layout backend).
+#: ``auto``: OCR pages without a text layer when Tesseract or RapidOCR is installed;
+#: ``off``: never; ``force``: OCR every page.
+PDF_OCR_MODES: tuple[str, ...] = ("auto", "off", "force")
+#: ``markdown`` pipe tables, or ``html`` tables that keep merged cells.
+PDF_TABLE_FORMATS: tuple[str, ...] = ("markdown", "html")
+DEFAULT_PDF_OCR = "auto"
+DEFAULT_PDF_TABLE_FORMAT = "markdown"
 #: Largest decoded payload accepted by ``parse_document_bytes`` / ``parse_bytes``.
 MAX_BYTES_INPUT = 100 * 1024 * 1024
 

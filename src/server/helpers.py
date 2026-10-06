@@ -74,7 +74,7 @@ _JSON_TYPES: dict[str, tuple[type, ...]] = {
 
 
 def validate_arguments(schema: dict[str, Any], arguments: dict[str, Any]) -> None:
-    """Check tool arguments against the tool's input schema (top level).
+    """Check tool arguments against the tool's input schema (nested objects too).
 
     Unlike a generic JSON-schema error ("-3 is less than the minimum of 0"), each
     message names the argument and the accepted values.
@@ -105,6 +105,11 @@ def validate_arguments(schema: dict[str, Any], arguments: dict[str, Any]) -> Non
             raise ValueError(
                 f"{name} is too long ({len(value)} characters, limit {spec['maxLength']})."
             )
+        if expected == "object" and isinstance(spec.get("properties"), dict):
+            try:
+                validate_arguments(spec, value)
+            except ValueError as e:
+                raise ValueError(f"{name}: {e}") from e
         if expected == "array":
             if "minItems" in spec and len(value) < spec["minItems"]:
                 raise ValueError(f"{name} must have at least {spec['minItems']} item(s).")
@@ -113,6 +118,33 @@ def validate_arguments(schema: dict[str, Any], arguments: dict[str, Any]) -> Non
                     f"{name} has {len(value)} items; the limit is {spec['maxItems']}. "
                     "Split the request into several calls."
                 )
+
+
+def pdf_options(arguments: dict[str, Any]) -> tuple[str, str]:
+    """``(ocr, table_format)`` from tool arguments, validated, defaults filled in.
+
+    Raises:
+        ValueError: unknown value, naming the accepted ones.
+    """
+    from .config import DEFAULT_PDF_OCR, DEFAULT_PDF_TABLE_FORMAT
+    from .documents import validate_extract_options
+
+    ocr = arguments.get("ocr") or DEFAULT_PDF_OCR
+    table_format = arguments.get("table_format") or DEFAULT_PDF_TABLE_FORMAT
+    validate_extract_options(ocr, table_format)
+    return ocr, table_format
+
+
+def pdf_options_hint(ocr: str, table_format: str) -> str:
+    """``, ocr='off'``-style suffix for a follow-up call hint (empty for defaults)."""
+    from .config import DEFAULT_PDF_OCR, DEFAULT_PDF_TABLE_FORMAT
+
+    parts = []
+    if ocr != DEFAULT_PDF_OCR:
+        parts.append(f", ocr='{ocr}'")
+    if table_format != DEFAULT_PDF_TABLE_FORMAT:
+        parts.append(f", table_format='{table_format}'")
+    return "".join(parts)
 
 
 def validate_file_path(file_path: str | None) -> Path:

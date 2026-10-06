@@ -64,6 +64,12 @@ __all__ = [
 #: Whether ``chunk()`` attaches TF-IDF keywords unless told otherwise.
 KEYWORDS_BY_DEFAULT = False
 
+#: PDF OCR modes: ``auto`` OCRs only pages without a text layer (needs Tesseract or
+#: RapidOCR), ``off`` never OCRs, ``force`` OCRs every page.
+OCRMode = Literal["auto", "off", "force"]
+#: PDF table rendering: Markdown pipe tables, or HTML tables (keep merged cells).
+TableFormat = Literal["markdown", "html"]
+
 
 # =============================================================================
 # Data Classes
@@ -202,17 +208,24 @@ def _validate_path(file_path: str | Path) -> Path:
         raise ChomperError(str(e)) from e
 
 
-def _load(path: Path, *, use_cache: bool = True) -> Any:
+def _load(
+    path: Path,
+    *,
+    use_cache: bool = True,
+    ocr: str = "auto",
+    table_format: str = "markdown",
+) -> Any:
     """Extract ``path`` through the shared document cache."""
     from src.server.cache import cached_extract
-    from src.server.documents import extractor_class_for
+    from src.server.documents import extractor_class_for, extractor_options
 
     try:
         extractor_cls = extractor_class_for(path)
+        options = extractor_options(path, ocr=ocr, table_format=table_format)
     except ValueError as e:
         raise ChomperError(str(e)) from e
     # Extraction errors propagate unchanged, as they always have.
-    return cached_extract(path, extractor_cls, use_cache=use_cache)
+    return cached_extract(path, extractor_cls, options, use_cache=use_cache)
 
 
 def _collect_images(raw_doc: Any) -> list[dict[str, Any]]:
@@ -227,6 +240,16 @@ def _collect_images(raw_doc: Any) -> list[dict[str, Any]]:
     from src.extractors.image_utils import collect_images
 
     return collect_images(getattr(raw_doc, "structure", None))
+
+
+def _check_options(ocr: str, table_format: str) -> None:
+    """Raise ChomperError for an unknown ``ocr`` / ``table_format`` value."""
+    from src.server.documents import validate_extract_options
+
+    try:
+        validate_extract_options(ocr, table_format)
+    except ValueError as e:
+        raise ChomperError(str(e)) from e
 
 
 def _decode_content(content: bytes | str) -> bytes:
@@ -262,8 +285,10 @@ def _parse_path(
     include_images: bool,
     max_chars: int | None,
     use_cache: bool,
+    ocr: str = "auto",
+    table_format: str = "markdown",
 ) -> ParseResult:
-    raw_doc = _load(path, use_cache=use_cache)
+    raw_doc = _load(path, use_cache=use_cache, ocr=ocr, table_format=table_format)
     text = raw_doc.text or ""
 
     if max_chars is not None and max_chars >= 0 and len(text) > max_chars:
@@ -292,6 +317,8 @@ def parse(
     *,
     include_images: bool = False,
     max_chars: int | None = None,
+    ocr: OCRMode = "auto",
+    table_format: TableFormat = "markdown",
 ) -> ParseResult:
     """
     Parse a document and extract text, metadata, and optionally images.
@@ -303,12 +330,17 @@ def parse(
         file_path: Path to the document file.
         include_images: Whether to extract image information.
         max_chars: Maximum characters to return (None = all).
+        ocr: PDFs only. "auto" (default) OCRs pages that have no text layer
+            (scans) when Tesseract or RapidOCR is installed; "off" never OCRs;
+            "force" OCRs every page. Ignored for other formats.
+        table_format: PDFs only. "markdown" (default) pipe tables, or "html"
+            tables that keep merged cells. Ignored for other formats.
 
     Returns:
         ParseResult with text, metadata, and document info.
 
     Raises:
-        ChomperError: If file not found or format not supported.
+        ChomperError: If file not found, format not supported or an option invalid.
 
     Example:
         >>> result = chomper.parse("/path/to/report.pdf")
@@ -317,7 +349,10 @@ def parse(
         >>> print(f"Pages: {result.metadata.get('page_count')}")
     """
     path = _validate_path(file_path)
-    return _parse_path(path, include_images=include_images, max_chars=max_chars, use_cache=True)
+    return _parse_path(
+        path, include_images=include_images, max_chars=max_chars, use_cache=True,
+        ocr=ocr, table_format=table_format,
+    )
 
 
 def parse_bytes(
@@ -326,6 +361,8 @@ def parse_bytes(
     *,
     include_images: bool = False,
     max_chars: int | None = None,
+    ocr: OCRMode = "auto",
+    table_format: TableFormat = "markdown",
 ) -> ParseResult:
     """
     Parse a document from bytes or base64-encoded content.
@@ -343,12 +380,18 @@ def parse_bytes(
         filename: Filename with extension (e.g., "report.pdf").
         include_images: Whether to extract image information.
         max_chars: Maximum characters to return (None = all).
+        ocr: PDFs only. "auto" (default) OCRs pages that have no text layer
+            (scans) when Tesseract or RapidOCR is installed; "off" never OCRs;
+            "force" OCRs every page. Ignored for other formats.
+        table_format: PDFs only. "markdown" (default) pipe tables, or "html"
+            tables that keep merged cells. Ignored for other formats.
 
     Returns:
         ParseResult with text, metadata, and document info.
 
     Raises:
-        ChomperError: If format not supported, content invalid or too large.
+        ChomperError: If format not supported, content invalid or too large, or an
+            option invalid.
 
     Example:
         >>> result = chomper.parse_bytes(base64_content, "document.pdf")
@@ -366,6 +409,7 @@ def parse_bytes(
 
         raise ChomperError(EXTRACTORS.unavailable_reason(ext) or f"Unsupported format: {ext}")
 
+    _check_options(ocr, table_format)
     content_bytes = _decode_content(content)
 
     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
@@ -375,7 +419,7 @@ def parse_bytes(
     try:
         result = _parse_path(
             tmp_path.resolve(), include_images=include_images, max_chars=max_chars,
-            use_cache=False,
+            use_cache=False, ocr=ocr, table_format=table_format,
         )
         result.file_path = filename
         return result
@@ -386,11 +430,13 @@ def parse_bytes(
 def chunk(
     file_path: str | Path,
     *,
-    strategy: Literal["auto", "semantic", "fixed", "recursive"] = "auto",
+    strategy: Literal["auto", "semantic", "fixed", "recursive", "layout"] = "auto",
     chunk_size: int = 1000,
     overlap: int = 100,
     embedding_model: Literal["fast", "balanced"] = "fast",
     keywords: bool = KEYWORDS_BY_DEFAULT,
+    ocr: OCRMode = "auto",
+    table_format: TableFormat = "markdown",
 ) -> list[ChunkResult]:
     """
     Split a document into chunks for RAG/embedding systems.
@@ -407,12 +453,23 @@ def chunk(
               sentences; never inside a code fence or table row)
             - "fixed": Fixed word windows that only break between lines
             - "semantic": Embedding-based breakpoints (best for RAG)
+            - "layout": PDFs: the layout-model Markdown that parse() returns, cut at
+              headings, never inside a table or figure line, with page/pages,
+              heading_path metadata and offsets into parse() text (other formats:
+              same as "auto")
         chunk_size: Maximum words per chunk (default: 1000).
         overlap: Words to overlap between chunks (default: 100).
         embedding_model: For semantic strategy:
             - "fast": all-MiniLM-L6-v2 (~80MB, faster)
             - "balanced": all-mpnet-base-v2 (~420MB, better quality)
         keywords: Attach TF-IDF keywords to each chunk.
+        ocr: PDFs only. "auto" (default) OCRs pages that have no text layer
+            (scans) when Tesseract or RapidOCR is installed; "off" never OCRs;
+            "force" OCRs every page. Ignored for other formats.
+        table_format: PDFs only. "markdown" (default) pipe tables, or "html"
+            tables that keep merged cells. Ignored for other formats.
+            Both apply to strategies that chunk extracted text; "auto" on a PDF
+            reads the file directly, so setting either there raises ChomperError.
 
     Returns:
         List of ChunkResult objects.
@@ -436,6 +493,8 @@ def chunk(
             overlap=overlap,
             embedding_model=embedding_model,
             keywords=keywords,
+            ocr=ocr,
+            table_format=table_format,
         )
     except ValueError as e:
         raise ChomperError(str(e)) from e
@@ -458,7 +517,12 @@ def chunk(
     return results
 
 
-def extract_metadata(file_path: str | Path) -> MetadataResult:
+def extract_metadata(
+    file_path: str | Path,
+    *,
+    ocr: OCRMode = "auto",
+    table_format: TableFormat = "markdown",
+) -> MetadataResult:
     """
     Quick metadata extraction.
 
@@ -466,6 +530,13 @@ def extract_metadata(file_path: str | Path) -> MetadataResult:
 
     Args:
         file_path: Path to the document file.
+        ocr: PDFs only. "auto" (default) OCRs pages that have no text layer
+            (scans) when Tesseract or RapidOCR is installed; "off" never OCRs;
+            "force" OCRs every page. Ignored for other formats.
+        table_format: PDFs only. "markdown" (default) pipe tables, or "html"
+            tables that keep merged cells. Ignored for other formats.
+            Pass the same values as an earlier parse() to reuse its cached
+            extraction.
 
     Returns:
         MetadataResult with file and document metadata.
@@ -480,7 +551,7 @@ def extract_metadata(file_path: str | Path) -> MetadataResult:
     from src.extractors.image_utils import count_images
 
     path = _validate_path(file_path)
-    raw_doc = _load(path)
+    raw_doc = _load(path, ocr=ocr, table_format=table_format)
 
     metadata = dict(raw_doc.metadata) if raw_doc.metadata else {}
     text = raw_doc.text or ""

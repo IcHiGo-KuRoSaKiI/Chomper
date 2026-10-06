@@ -178,10 +178,12 @@ def cached_extract(
     return DOCUMENT_CACHE.get_or_load(key, load)
 
 
-def peek_document(path: str | Path, extractor_cls: type) -> Any | None:
-    """A cached RawDocument for ``path`` if one exists, without extracting."""
+def peek_document(
+    path: str | Path, extractor_cls: type, options: tuple[tuple[str, Any], ...] = ()
+) -> Any | None:
+    """A cached RawDocument for ``path`` and ``options`` if one exists, without extracting."""
     try:
-        key = (*file_key(path), f"{extractor_cls.__module__}.{extractor_cls.__qualname__}", ())
+        key = (*file_key(path), f"{extractor_cls.__module__}.{extractor_cls.__qualname__}", options)
     except OSError:
         return None
     return DOCUMENT_CACHE.peek(key)

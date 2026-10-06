@@ -21,6 +21,8 @@ from src.server.helpers import (
     detect_mime_type,
     extract_images_from_structure,
     parse_from_base64,
+    pdf_options,
+    pdf_options_hint,
     remove_image_placeholders,
     run_blocking,
     validate_file_path,
@@ -62,14 +64,15 @@ def parse_document_sync(
     full_text = arguments.get("full_text", False)
     include_images = arguments.get("include_images", False)
     output_format = arguments.get("output_format", DEFAULT_OUTPUT_FORMAT)
+    ocr, table_format = pdf_options(arguments)
 
     # Validate path
     file_path = validate_file_path(file_path_str)
 
     logger.info(f"Parsing document: {file_path} (full_text={full_text}, include_images={include_images})")
 
-    # Extract raw document (cached for unchanged files)
-    raw_doc = load_document(file_path, use_cache=use_cache)
+    # Extract raw document (cached for unchanged files and the same options)
+    raw_doc = load_document(file_path, use_cache=use_cache, ocr=ocr, table_format=table_format)
 
     # Clean text by removing image placeholders
     clean_text = remove_image_placeholders(raw_doc.text)
@@ -129,7 +132,8 @@ def parse_document_sync(
         if truncated:
             metadata_dict["continuation_hint"] = (
                 f"Document has {total_chars - DEFAULT_SUMMARY_CHARS} more characters. "
-                f"Use get_document_chunk(file_path, offset={DEFAULT_SUMMARY_CHARS}) for more."
+                f"Use get_document_chunk(file_path, offset={DEFAULT_SUMMARY_CHARS}"
+                f"{pdf_options_hint(ocr, table_format)}) for more."
             )
 
         # Add page count for PDFs; image count for any format with images
@@ -217,6 +221,7 @@ async def handle_parse_document_bytes(arguments: dict[str, Any]) -> list[TextCon
     """
     content_base64 = arguments.get("content_base64")
     filename = arguments.get("filename")
+    pdf_options(arguments)  # reject bad options before decoding the payload
 
     if not content_base64 or not isinstance(content_base64, str):
         raise ValueError("content_base64 is required: the file's bytes, base64-encoded.")
@@ -238,6 +243,8 @@ def _parse_bytes_sync(
             "full_text": arguments.get("full_text", False),
             "include_images": arguments.get("include_images", False),
             "output_format": arguments.get("output_format", DEFAULT_OUTPUT_FORMAT),
+            "ocr": arguments.get("ocr"),
+            "table_format": arguments.get("table_format"),
         }
         # Temp files are never cached: the path is reused and the content is one-off.
         result = parse_document_sync(modified_args, use_cache=False)

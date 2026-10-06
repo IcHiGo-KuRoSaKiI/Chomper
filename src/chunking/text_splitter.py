@@ -35,6 +35,10 @@ HEADING = 4
 #: cut at a boundary of this strength. Strong boundaries are worth a shorter chunk.
 _MIN_FILL = {HEADING: 0.2, BLOCK: 0.4, LINE: 0.6, SENTENCE: 0.6, WORD: 0.0}
 
+#: Units never repeated as overlap: a whole code block, table or figure line would
+#: be duplicated in the next chunk.
+_NO_OVERLAP_KINDS = frozenset({"code", "table", "pipe_table", "html_table", "figure"})
+
 _FENCE_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
 _HEADING_RE = re.compile(r"^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$")
 _TABLE_ROW_RE = re.compile(r"^\s*\|")
@@ -116,6 +120,16 @@ def _split_long_line(
             )
             first = False
     return units
+
+
+def sentence_units(
+    text: str, start: int, end: int, max_words: int, strength: int = BLOCK
+) -> list[Unit]:
+    """``text[start:end]`` as sentence units (word windows for an over-long sentence).
+
+    The first unit gets ``strength``; later ones are sentence boundaries.
+    """
+    return _split_long_line(text, start, end, max(1, max_words), strength)
 
 
 def segment(text: str, max_words: int, start: int = 0, end: int | None = None) -> list[Unit]:
@@ -269,7 +283,7 @@ def pack(
             carried = 0
             while nxt - 1 > s:
                 unit = units[nxt - 1]
-                if carried + unit.words > overlap or unit.kind == "code":
+                if carried + unit.words > overlap or unit.kind in _NO_OVERLAP_KINDS:
                     break
                 carried += unit.words
                 nxt -= 1

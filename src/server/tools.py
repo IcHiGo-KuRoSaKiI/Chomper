@@ -2,7 +2,48 @@
 MCP Tool definitions for Chomper.
 """
 
+from typing import Any
+
 from mcp.types import Tool
+
+from .config import (
+    CHUNK_STRATEGIES,
+    DEFAULT_PDF_OCR,
+    DEFAULT_PDF_TABLE_FORMAT,
+    PDF_OCR_MODES,
+    PDF_TABLE_FORMATS,
+)
+
+#: ``ocr`` argument, shared by every tool that extracts text.
+OCR_PROPERTY: dict[str, Any] = {
+    "type": "string",
+    "enum": list(PDF_OCR_MODES),
+    "default": DEFAULT_PDF_OCR,
+    "description": (
+        "PDFs only (ignored for other formats). OCR matters only for pages without a "
+        "text layer, such as scans: 'auto' (default) OCRs just those pages; 'off' never "
+        "OCRs (scanned pages come back as image markers you can fetch with "
+        "get_document_images); 'force' OCRs every page, which is slow and only useful "
+        "when the text layer is garbled. OCR needs Tesseract or RapidOCR installed on "
+        "the server; without one, scanned pages stay unread and the metadata says so."
+    ),
+}
+#: ``table_format`` argument, shared by every tool that extracts text.
+TABLE_FORMAT_PROPERTY: dict[str, Any] = {
+    "type": "string",
+    "enum": list(PDF_TABLE_FORMATS),
+    "default": DEFAULT_PDF_TABLE_FORMAT,
+    "description": (
+        "PDFs only (ignored for other formats). How tables are written into the text: "
+        "'markdown' (default) pipe tables, or 'html' <table> markup that keeps merged "
+        "and spanning cells. Offsets from get_document_chunk depend on this, so page "
+        "with the same value you parsed with."
+    ),
+}
+
+
+def _pdf_options() -> dict[str, Any]:
+    return {"ocr": dict(OCR_PROPERTY), "table_format": dict(TABLE_FORMAT_PROPERTY)}
 
 
 def get_tools() -> list[Tool]:
@@ -22,7 +63,8 @@ def get_tools() -> list[Tool]:
                     "file_path": {"type": "string", "description": "Absolute path to the document file"},
                     "full_text": {"type": "boolean", "default": False, "description": "If true, return complete text. Default false returns first 5000 chars with continuation hint."},
                     "include_images": {"type": "boolean", "default": False, "description": "Include extracted images as ImageContent (default: false). Use get_document_images for on-demand retrieval."},
-                    "output_format": {"type": "string", "enum": ["json", "toon"], "default": "json", "description": "Output format: 'json' (default) or 'toon' (token-optimized, ~40% fewer tokens)"}
+                    "output_format": {"type": "string", "enum": ["json", "toon"], "default": "json", "description": "Output format: 'json' (default) or 'toon' (token-optimized, ~40% fewer tokens)"},
+                    **_pdf_options(),
                 },
                 "required": ["file_path"]
             }
@@ -37,7 +79,8 @@ def get_tools() -> list[Tool]:
                     "filename": {"type": "string", "description": "Filename with extension for format detection (e.g., 'report.pdf', 'data.xlsx', 'doc.docx')"},
                     "full_text": {"type": "boolean", "default": False, "description": "If true, return complete text. Default false returns first 5000 chars with continuation hint."},
                     "include_images": {"type": "boolean", "default": False, "description": "Include extracted images as ImageContent (default: false)."},
-                    "output_format": {"type": "string", "enum": ["json", "toon"], "default": "json", "description": "Output format: 'json' (default) or 'toon' (token-optimized, ~40% fewer tokens)"}
+                    "output_format": {"type": "string", "enum": ["json", "toon"], "default": "json", "description": "Output format: 'json' (default) or 'toon' (token-optimized, ~40% fewer tokens)"},
+                    **_pdf_options(),
                 },
                 "required": ["content_base64", "filename"]
             }
@@ -51,7 +94,8 @@ def get_tools() -> list[Tool]:
                     "file_path": {"type": "string", "description": "Absolute path to the document file"},
                     "offset": {"type": "integer", "default": 0, "minimum": 0, "description": "Character offset to start from (default: 0)"},
                     "limit": {"type": "integer", "default": 5000, "minimum": 1, "description": "Maximum characters to return (default: 5000)"},
-                    "output_format": {"type": "string", "enum": ["json", "toon"], "default": "json", "description": "Output format: 'json' (default) or 'toon' (token-optimized)"}
+                    "output_format": {"type": "string", "enum": ["json", "toon"], "default": "json", "description": "Output format: 'json' (default) or 'toon' (token-optimized)"},
+                    **_pdf_options(),
                 },
                 "required": ["file_path"]
             }
@@ -80,10 +124,11 @@ def get_tools() -> list[Tool]:
                     "file_path": {"type": "string", "description": "Absolute path to the document file"},
                     "chunk_size": {"type": "integer", "default": 1000, "minimum": 1, "description": "Maximum words per chunk (default: 1000)"},
                     "overlap": {"type": "integer", "default": 100, "minimum": 0, "description": "Words to overlap between chunks (default: 100)"},
-                    "chunking_strategy": {"type": "string", "enum": ["auto", "semantic", "fixed", "recursive"], "default": "auto", "description": "Chunking strategy: 'auto' (format-aware: PDF structure, headings, code functions, sheets), 'recursive' (headings > paragraphs > lines > sentences, never inside code fences or table rows), 'fixed' (fixed word windows that break only between lines), 'semantic' (embedding-based topic boundaries)"},
+                    "chunking_strategy": {"type": "string", "enum": list(CHUNK_STRATEGIES), "default": "auto", "description": "Chunking strategy: 'auto' (format-aware: PDF structure, headings, code functions, sheets), 'recursive' (headings > paragraphs > lines > sentences, never inside code fences or table rows), 'fixed' (fixed word windows that break only between lines), 'semantic' (embedding-based topic boundaries), 'layout' (PDFs: chunks the layout-model text that parse_document returns, cut at headings, never inside a table or figure marker, oversized tables split by rows with the header repeated; chunks carry page/pages and heading_path, and start_char/end_char index parse_document text; other formats: same as 'auto'). ocr and table_format need a strategy other than 'auto' for PDFs."},
                     "embedding_model": {"type": "string", "enum": ["fast", "balanced"], "default": "fast", "description": "Embedding model for semantic chunking: 'fast' (~80MB) or 'balanced' (~420MB, better quality)"},
                     "include_keywords": {"type": "boolean", "default": False, "description": "Attach TF-IDF keywords (fitted across the document's chunks) to each chunk"},
-                    "output_format": {"type": "string", "enum": ["json", "toon"], "default": "json", "description": "Output format: 'json' (default) or 'toon' (token-optimized)"}
+                    "output_format": {"type": "string", "enum": ["json", "toon"], "default": "json", "description": "Output format: 'json' (default) or 'toon' (token-optimized)"},
+                    **_pdf_options(),
                 },
                 "required": ["file_path"]
             }
@@ -117,7 +162,8 @@ def get_tools() -> list[Tool]:
                         "description": "Parsing options for all files",
                         "properties": {
                             "include_images": {"type": "boolean", "default": False, "description": "Include images (default: false)"},
-                            "continue_on_error": {"type": "boolean", "default": True, "description": "Continue if a file fails (default: true)"}
+                            "continue_on_error": {"type": "boolean", "default": True, "description": "Continue if a file fails (default: true)"},
+                            **_pdf_options(),
                         }
                     }
                 },

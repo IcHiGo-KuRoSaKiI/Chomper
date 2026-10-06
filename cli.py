@@ -32,6 +32,14 @@ import argparse
 import sys
 from pathlib import Path
 
+from src.server.config import (
+    CHUNK_STRATEGIES,
+    DEFAULT_PDF_OCR,
+    DEFAULT_PDF_TABLE_FORMAT,
+    PDF_OCR_MODES,
+    PDF_TABLE_FORMATS,
+)
+
 # Version
 __version__ = "1.0.0"
 
@@ -56,6 +64,9 @@ Examples:
   chomper-parse doc.pdf -f template -t t.j2 Use custom Jinja2 template
   chomper-parse data.xlsx --metadata        Show metadata only
   chomper-parse book.pdf --chunk            Split into chunks
+  chomper-parse book.pdf --chunk --strategy layout  Chunk the layout text, with pages
+  chomper-parse scan.pdf --ocr force        OCR every page
+  chomper-parse report.pdf --table-format html  Tables as HTML (keeps merged cells)
   chomper-parse file.pdf -o out.txt         Save output to file
   chomper-parse --formats                   List all supported formats
 
@@ -142,12 +153,34 @@ For Python library usage: import chomper
 
     parser.add_argument(
         "--strategy",
-        choices=["auto", "recursive", "fixed", "semantic"],
+        choices=list(CHUNK_STRATEGIES),
         default="auto",
         help=(
             "Chunking strategy (default: auto). auto: format-aware; recursive: headings > "
             "paragraphs > lines > sentences; fixed: word windows on line breaks; "
-            "semantic: embedding topic boundaries"
+            "semantic: embedding topic boundaries; layout: PDFs chunked from the "
+            "layout-model text parse() returns, never inside a table, with page numbers"
+        ),
+    )
+
+    parser.add_argument(
+        "--ocr",
+        choices=list(PDF_OCR_MODES),
+        default=DEFAULT_PDF_OCR,
+        help=(
+            "PDFs only: OCR for pages without a text layer (default: auto). auto OCRs "
+            "only those pages; off never; force OCRs every page. Needs Tesseract or "
+            "RapidOCR. With --chunk, needs a --strategy other than auto"
+        ),
+    )
+
+    parser.add_argument(
+        "--table-format",
+        choices=list(PDF_TABLE_FORMATS),
+        default=DEFAULT_PDF_TABLE_FORMAT,
+        help=(
+            "PDFs only: write tables as markdown pipe tables (default) or html "
+            "(keeps merged cells)"
         ),
     )
 
@@ -322,7 +355,9 @@ def run_watch_mode(args: argparse.Namespace) -> int:
 
             # Parse the document
             if args.metadata:
-                meta = chomper.extract_metadata(file_path)
+                meta = chomper.extract_metadata(
+                    file_path, ocr=args.ocr, table_format=args.table_format
+                )
                 output_text = formatter.format_metadata(meta)
             elif args.chunk:
                 chunks = chomper.chunk(
@@ -331,10 +366,15 @@ def run_watch_mode(args: argparse.Namespace) -> int:
                     chunk_size=args.chunk_size,
                     overlap=args.overlap,
                     keywords=args.keywords,
+                    ocr=args.ocr,
+                    table_format=args.table_format,
                 )
                 output_text = formatter.format_chunks(chunks, str(file_path), args.strategy)
             else:
-                result = chomper.parse(file_path, max_chars=args.max_chars)
+                result = chomper.parse(
+                    file_path, max_chars=args.max_chars,
+                    ocr=args.ocr, table_format=args.table_format,
+                )
                 output_text = formatter.format_parse_result(result)
 
             # Output the result
@@ -469,7 +509,9 @@ def main() -> int:
             if not args.quiet:
                 print(f"Extracting metadata from: {file_path.name}", file=sys.stderr)
 
-            meta = chomper.extract_metadata(file_path)
+            meta = chomper.extract_metadata(
+                file_path, ocr=args.ocr, table_format=args.table_format
+            )
             output_text = formatter.format_metadata(meta)
 
         elif args.chunk:
@@ -483,6 +525,8 @@ def main() -> int:
                 chunk_size=args.chunk_size,
                 overlap=args.overlap,
                 keywords=args.keywords,
+                ocr=args.ocr,
+                table_format=args.table_format,
             )
             output_text = formatter.format_chunks(chunks, str(file_path), args.strategy)
 
@@ -491,7 +535,10 @@ def main() -> int:
             if not args.quiet:
                 print(f"Parsing: {file_path.name}", file=sys.stderr)
 
-            result = chomper.parse(file_path, max_chars=args.max_chars)
+            result = chomper.parse(
+                file_path, max_chars=args.max_chars,
+                ocr=args.ocr, table_format=args.table_format,
+            )
             output_text = formatter.format_parse_result(result)
 
         # Output result
