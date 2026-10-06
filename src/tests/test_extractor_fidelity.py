@@ -572,3 +572,124 @@ def test_html_embedded_data_image_becomes_a_record(tmp_path: Path):
     assert raw.text == "Before ![Logo](image:img-1) after"
     images = collect_images(raw.structure)
     assert [(img["id"], img["alt"], img["width"]) for img in images] == [("img-1", "Logo", 200)]
+
+
+# ------------------------------------------------------------------------- EPUB
+
+ebooklib_epub = pytest.importorskip("ebooklib.epub", reason="ebooklib required")
+from src.extractors.epub_extractor import EPUBExtractor  # noqa: E402
+
+
+@pytest.fixture
+def book_path(tmp_path: Path) -> Path:
+    book = ebooklib_epub.EpubBook()
+    book.set_identifier("id-1")
+    book.set_title("Field Guide")
+    book.set_language("en")
+    book.add_author("A. Writer")
+
+    # Manifest order (chapter two first) differs from reading order (spine).
+    two = ebooklib_epub.EpubHtml(title="Two", file_name="text/two.xhtml", lang="en")
+    two.content = (
+        "<html><body><h2>Chapter Two</h2><p>Steps:</p><ol><li>Look</li><li>Listen"
+        "<ul><li>birds</li></ul></li></ol>"
+        '<p><img src="../images/map.png" alt="Trail map"/></p></body></html>'
+    )
+    one = ebooklib_epub.EpubHtml(title="Prologue", file_name="text/one.xhtml", lang="en")
+    one.content = "<html><body><p>Short.</p></body></html>"
+    image = ebooklib_epub.EpubItem(
+        uid="map", file_name="images/map.png", media_type="image/png", content=_png(240, 160, "green")
+    )
+    for item in (two, one, image):
+        book.add_item(item)
+    book.toc = (ebooklib_epub.Link("text/one.xhtml", "Prologue", "one"), ebooklib_epub.Link("text/two.xhtml", "Two", "two"))
+    book.add_item(ebooklib_epub.EpubNcx())
+    book.add_item(ebooklib_epub.EpubNav())
+    book.spine = ["nav", one, two]
+    path = tmp_path / "guide.epub"
+    ebooklib_epub.write_epub(str(path), book)
+    return path
+
+
+def test_epub_reads_spine_order_keeps_short_chapters_and_images(book_path: Path):
+    raw = EPUBExtractor().extract(str(book_path))
+    assert raw.text == (
+        "# Field Guide\n\n"
+        "**Author:** A. Writer\n\n"
+        "## Table of Contents\n\n"
+        "- Prologue\n"
+        "- Two\n\n"
+        "## Prologue\n\n"
+        "Short.\n\n"
+        "## Chapter Two\n\n"
+        "Steps:\n\n"
+        "1. Look\n"
+        "2. Listen\n"
+        "  - birds\n\n"
+        "![Trail map](image:img-1)"
+    )
+    images = collect_images(raw.structure)
+    assert [(img["id"], img["alt"], img["width"]) for img in images] == [("img-1", "Trail map", 240)]
+
+
+# ------------------------------------------------------------------------ Email
+
+from email.message import EmailMessage  # noqa: E402
+
+from src.extractors.email_extractor import EMLExtractor  # noqa: E402
+
+
+def test_html_only_email_is_markdown_untruncated_with_images_and_attachments(tmp_path: Path):
+    long_paragraph = " ".join(f"word{i}" for i in range(1200)) + " END"
+    msg = EmailMessage()
+    msg["Subject"] = "Quarterly update"
+    msg["From"] = "Ana <ana@example.com>"
+    msg["To"] = "team@example.com"
+    msg["Date"] = "Mon, 02 Mar 2026 10:00:00 +0000"
+    msg.set_content(
+        "<html><body><p>Hello <b>team</b>,</p><ul><li>Revenue up</li><li>Costs down</li></ul>"
+        '<p><img src="cid:chart1@example" alt="Chart"></p>'
+        f"<p>{long_paragraph}</p></body></html>",
+        subtype="html",
+    )
+    msg.add_related(_png(300, 200, "navy"), maintype="image", subtype="png", cid="<chart1@example>")
+    msg.add_attachment(b"%PDF-1.4\n" + b"0" * 1200, maintype="application", subtype="pdf", filename="report.pdf")
+    path = tmp_path / "update.eml"
+    path.write_bytes(msg.as_bytes())
+
+    raw = EMLExtractor().extract(str(path))
+    assert raw.text == (
+        "# Quarterly update\n\n"
+        "**From:** Ana <ana@example.com>\n"
+        "**To:** team@example.com\n"
+        "**Date:** Mon, 02 Mar 2026 10:00:00 +0000\n\n"
+        "Hello **team**,\n\n"
+        "- Revenue up\n"
+        "- Costs down\n\n"
+        "![Chart](image:img-1)\n\n"
+        f"{long_paragraph}\n\n"
+        "## Attachments\n\n"
+        "- report.pdf (application/pdf, 1.2 KB)"
+    )
+    assert raw.metadata["body_source"] == "html"
+    assert raw.metadata["attachments"] == [
+        {"filename": "report.pdf", "content_type": "application/pdf", "size": 1209}
+    ]
+    images = collect_images(raw.structure)
+    assert [(img["id"], img["alt"], img["width"]) for img in images] == [("img-1", "Chart", 300)]
+
+
+def test_plain_text_email_body_is_kept_verbatim(tmp_path: Path):
+    msg = EmailMessage()
+    msg["Subject"] = "Hi"
+    msg["From"] = "a@example.com"
+    msg["To"] = "b@example.com"
+    msg.set_content("Line one\n\n- item\n- item two\n")
+    msg.add_alternative("<p>Line one</p><ul><li>item</li><li>item two</li></ul>", subtype="html")
+    path = tmp_path / "plain.eml"
+    path.write_bytes(msg.as_bytes())
+    raw = EMLExtractor().extract(str(path))
+    assert raw.text == (
+        "# Hi\n\n**From:** a@example.com\n**To:** b@example.com\n\nLine one\n\n- item\n- item two"
+    )
+    assert raw.metadata["body_source"] == "plain"

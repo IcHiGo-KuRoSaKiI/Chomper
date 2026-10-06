@@ -1,18 +1,32 @@
 """
-Extractor for EPUB e-book format.
+Extractor for EPUB e-books.
 
-EPUB files are essentially ZIP archives containing XHTML content,
-CSS styles, images, and metadata in a structured format.
+Chapters are read in reading order (``book.spine``), not manifest order, and
+each one is converted with the shared HTML-to-Markdown walker, so lists, tables
+and code come out like any other format. A chapter keeps its own headings; a
+chapter with no heading gets its table-of-contents title as ``##``, and no
+heading is ever added twice. Nothing is dropped for being short (a one-line
+epigraph is still content). Images stored in the book become lazy image records
+(``img-<n>``) with markers where they sit.
 """
+
+from __future__ import annotations
+
+import logging
+import posixpath
+import warnings
 from typing import Any
+from urllib.parse import unquote, urldefrag
 
 from ..models.document import RawDocument
 from .base import BaseExtractor
+from .markdown_utils import list_item
 
 # Optional import
 try:
     import ebooklib
     from ebooklib import epub
+
     EBOOKLIB_AVAILABLE = True
 except ImportError:
     ebooklib = None
@@ -21,29 +35,42 @@ except ImportError:
 
 try:
     from bs4 import BeautifulSoup
+
+    from .html_markdown import HTMLToMarkdown, strip_boilerplate
+
     BS4_AVAILABLE = True
 except ImportError:
     BeautifulSoup = None
     BS4_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
 
 
 class EPUBExtractor(BaseExtractor):
     """
     Extractor for EPUB e-book files.
 
-    Extracts text content, table of contents, and metadata from EPUB files.
-    Requires ebooklib and beautifulsoup4 libraries.
+    Extracts chapters in reading order as Markdown, the table of contents and
+    Dublin Core metadata. Requires ebooklib and beautifulsoup4.
     """
 
     SUPPORTED_EXTENSIONS = [".epub"]
 
-    def __init__(self, include_toc: bool = True, chapter_separator: str = "\n\n---\n\n"):
+    def __init__(
+        self,
+        include_toc: bool = True,
+        chapter_separator: str = "\n\n",
+        min_image_width: int = 100,
+        min_image_height: int = 100,
+    ):
         """
         Initialize EPUB extractor.
 
         Args:
-            include_toc: Include table of contents in output
-            chapter_separator: String to separate chapters
+            include_toc: Include the table of contents (as a nested list)
+            chapter_separator: String placed between chapters
+            min_image_width: Size floor for images stored in the book
+            min_image_height: Size floor for images stored in the book
         """
         if not EBOOKLIB_AVAILABLE:
             raise ImportError("ebooklib is required for EPUB extraction. Install with: pip install ebooklib")
@@ -51,66 +78,49 @@ class EPUBExtractor(BaseExtractor):
             raise ImportError("beautifulsoup4 is required for EPUB extraction. Install with: pip install beautifulsoup4")
         self.include_toc = include_toc
         self.chapter_separator = chapter_separator
+        self.min_image_width = min_image_width
+        self.min_image_height = min_image_height
 
     def extract(self, file_path: str) -> RawDocument:
-        """Extract content from EPUB file."""
+        """Extract content from an EPUB file."""
         self.validate_file(file_path)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # ebooklib's ignore_ncx deprecation chatter
+            book = epub.read_epub(file_path)
 
-        # Read EPUB file
-        book = epub.read_epub(file_path)
-
-        # Extract metadata
         book_metadata = self._extract_metadata(book)
-
-        # Extract table of contents
         toc = self._extract_toc(book)
+        toc_titles = {self._href_key(item["href"]): item["title"] for item in toc if item.get("href")}
+        chapters, images = self._extract_chapters(book, toc_titles)
 
-        # Extract chapters/content
-        chapters = self._extract_chapters(book)
-
-        # Build formatted output
-        text_parts = []
-
-        # Add metadata header
-        if book_metadata.get('title'):
-            text_parts.append(f"# {book_metadata['title']}\n")
-        if book_metadata.get('creator'):
-            text_parts.append(f"**Author:** {book_metadata['creator']}\n")
-
-        # Add TOC if requested
+        parts: list[str] = []
+        if book_metadata.get("title"):
+            parts.append(f"# {book_metadata['title']}")
+        if book_metadata.get("creator"):
+            parts.append(f"**Author:** {book_metadata['creator']}")
         if self.include_toc and toc:
-            text_parts.append("## Table of Contents\n")
-            for item in toc:
-                indent = "  " * item.get('level', 0)
-                text_parts.append(f"{indent}- {item['title']}")
-            text_parts.append("")
+            lines = [list_item(item["title"], item.get("level", 0), "-") for item in toc]
+            parts.append("## Table of Contents\n\n" + "\n".join(lines))
+        header = "\n\n".join(parts)
+        body = self.chapter_separator.join(c["text"] for c in chapters)
+        formatted_text = "\n\n".join(p for p in (header, body) if p)
 
-        # Add chapter content
-        text_parts.append("## Content\n")
-        for i, chapter in enumerate(chapters):
-            if chapter.get('title'):
-                text_parts.append(f"### {chapter['title']}\n")
-            text_parts.append(chapter['text'])
-            if i < len(chapters) - 1:
-                text_parts.append(self.chapter_separator)
-
-        formatted_text = "\n".join(text_parts)
-
-        # Build metadata dict
         metadata = self._get_basic_metadata(file_path)
-        metadata.update({
-            "format": "epub",
-            "title": book_metadata.get('title'),
-            "creator": book_metadata.get('creator'),
-            "author": book_metadata.get('creator'),  # Alias
-            "publisher": book_metadata.get('publisher'),
-            "language": book_metadata.get('language'),
-            "identifier": book_metadata.get('identifier'),
-            "description": book_metadata.get('description'),
-            "chapter_count": len(chapters),
-            "has_toc": len(toc) > 0,
-            "toc_items": len(toc),
-        })
+        metadata.update(
+            {
+                "format": "epub",
+                "title": book_metadata.get("title"),
+                "creator": book_metadata.get("creator"),
+                "author": book_metadata.get("creator"),  # Alias
+                "publisher": book_metadata.get("publisher"),
+                "language": book_metadata.get("language"),
+                "identifier": book_metadata.get("identifier"),
+                "description": book_metadata.get("description"),
+                "chapter_count": len(chapters),
+                "has_toc": len(toc) > 0,
+                "toc_items": len(toc),
+            }
+        )
 
         return RawDocument(
             text=formatted_text,
@@ -118,92 +128,93 @@ class EPUBExtractor(BaseExtractor):
             structure={
                 "type": "epub",
                 "toc": toc if self.include_toc else [],
-                "chapters": [{"title": c.get('title'), "word_count": len(c['text'].split())} for c in chapters],
-                "spine_items": len(list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT)))
-            }
+                "chapters": [
+                    {"title": c.get("title"), "word_count": len(c["text"].split()), "item_name": c["item_name"]}
+                    for c in chapters
+                ],
+                "spine_items": len(book.spine),
+                "images": images,
+            },
         )
 
-    def _extract_metadata(self, book) -> dict[str, Any]:
-        """Extract EPUB metadata."""
-        metadata = {}
+    # --------------------------------------------------------------- metadata
 
-        # Standard Dublin Core metadata
-        dc_fields = ['title', 'creator', 'language', 'identifier', 'publisher', 'description', 'subject', 'date']
-
-        for field in dc_fields:
-            try:
-                values = book.get_metadata('DC', field)
-                if values:
-                    # Get first value, handle tuple format
-                    value = values[0]
-                    if isinstance(value, tuple):
-                        value = value[0]
-                    metadata[field] = value
-            except Exception:
-                pass
-
+    def _extract_metadata(self, book: Any) -> dict[str, Any]:
+        """Dublin Core metadata (first value of each field)."""
+        metadata: dict[str, Any] = {}
+        for name in ("title", "creator", "language", "identifier", "publisher", "description", "subject", "date"):
+            values = book.get_metadata("DC", name)
+            if values:
+                value = values[0]
+                metadata[name] = value[0] if isinstance(value, tuple) else value
         return metadata
 
-    def _extract_toc(self, book) -> list[dict[str, Any]]:
-        """Extract table of contents."""
-        toc_items = []
+    def _extract_toc(self, book: Any) -> list[dict[str, Any]]:
+        """Flattened table of contents with nesting levels and target hrefs."""
+        toc_items: list[dict[str, Any]] = []
 
-        def process_toc(items, level=0):
+        def walk(items: Any, level: int = 0) -> None:
             for item in items:
                 if isinstance(item, tuple):
-                    # Section with nested items
                     section, nested = item
-                    toc_items.append({
-                        'title': section.title if hasattr(section, 'title') else str(section),
-                        'level': level
-                    })
-                    process_toc(nested, level + 1)
-                elif hasattr(item, 'title'):
-                    # Single link
-                    toc_items.append({
-                        'title': item.title,
-                        'level': level
-                    })
+                    toc_items.append(
+                        {
+                            "title": getattr(section, "title", str(section)),
+                            "level": level,
+                            "href": getattr(section, "href", None),
+                        }
+                    )
+                    walk(nested, level + 1)
+                elif hasattr(item, "title"):
+                    toc_items.append({"title": item.title, "level": level, "href": getattr(item, "href", None)})
 
-        try:
-            process_toc(book.toc)
-        except Exception:
-            pass
+        walk(book.toc)
+        return [item for item in toc_items if item.get("title")]
 
-        return toc_items
+    # --------------------------------------------------------------- chapters
 
-    def _extract_chapters(self, book) -> list[dict[str, Any]]:
-        """Extract chapter content."""
-        chapters = []
+    @staticmethod
+    def _href_key(href: str) -> str:
+        return posixpath.normpath(unquote(urldefrag(href)[0]))
 
-        for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
-            try:
-                content = item.get_content()
-                if content:
-                    # Parse HTML content
-                    soup = BeautifulSoup(content, 'html.parser')
+    def _extract_chapters(
+        self, book: Any, toc_titles: dict[str, str]
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Chapters in spine order, as Markdown, plus the image records they use."""
+        current_dir = [""]
 
-                    # Try to get title from <title> or first heading
-                    title = None
-                    title_tag = soup.find('title')
-                    if title_tag:
-                        title = title_tag.get_text(strip=True)
-                    if not title:
-                        heading = soup.find(['h1', 'h2', 'h3'])
-                        if heading:
-                            title = heading.get_text(strip=True)
+        def load_image(src: str) -> bytes | None:
+            if "://" in src or src.startswith("data:"):
+                return None
+            path = posixpath.normpath(posixpath.join(current_dir[0], unquote(urldefrag(src)[0])))
+            item = book.get_item_with_href(path)
+            return item.get_content() if item is not None else None
 
-                    # Extract text content
-                    text = soup.get_text(separator='\n', strip=True)
-
-                    # Skip empty chapters
-                    if text and len(text.strip()) > 50:
-                        chapters.append({
-                            'title': title,
-                            'text': text,
-                            'item_name': item.get_name()
-                        })
-            except Exception:
+        converter = HTMLToMarkdown(
+            image_loader=load_image,
+            min_image_width=self.min_image_width,
+            min_image_height=self.min_image_height,
+        )
+        chapters: list[dict[str, Any]] = []
+        for idref, _linear in book.spine:
+            item = book.get_item_with_id(idref)
+            if item is None:
+                logger.warning(f"EPUB spine entry {idref!r} has no manifest item")
                 continue
-
-        return chapters
+            if item.get_type() == ebooklib.ITEM_NAVIGATION or isinstance(item, epub.EpubNav):
+                continue
+            content = item.get_content()
+            if not content:
+                continue
+            current_dir[0] = posixpath.dirname(item.get_name())
+            soup = BeautifulSoup(content, "lxml")
+            strip_boilerplate(soup, chrome=False)
+            text = converter.convert(soup.find("body") or soup)
+            if not text.strip():
+                continue
+            heading_line = next((line for line in text.splitlines() if line.startswith("#")), None)
+            title = heading_line.lstrip("#").strip() if heading_line else toc_titles.get(self._href_key(item.get_name()))
+            if heading_line is None and title:
+                text = f"## {title}\n\n{text}"
+            chapters.append({"title": title, "text": text, "item_name": item.get_name()})
+        return chapters, converter.images
