@@ -25,6 +25,7 @@ from .config import (
     EXTRACTORS,
     PDF_OCR_MODES,
     PDF_TABLE_FORMATS,
+    UNREADABLE_FORMATS,
     supported_extensions_hint,
 )
 
@@ -59,7 +60,7 @@ def extractor_class_for(path: Path) -> type:
     if ext in EXTRACTORS:
         return EXTRACTORS[ext]
     reason = EXTRACTORS.unavailable_reason(ext)
-    if ext in EXTRACTORS.known():
+    if ext in EXTRACTORS.known() or ext in UNREADABLE_FORMATS:
         raise ValueError(reason)
     raise ValueError(
         f"Unsupported file format: {ext or '(no extension)'}. "
@@ -162,19 +163,28 @@ def build_chunker(
     """The chunker for ``ext`` and ``strategy``, configured through its constructor.
 
     Strategies (identical in the library, the CLI and MCP):
-        auto: format-aware chunker (PDF structure, DOCX/Markdown headings, code
-            functions, spreadsheet sheets/tables), structure-aware text otherwise.
+        auto: format-aware chunker -- for PDFs the ``layout`` chunker (the
+            ``structural`` one when pymupdf-layout is not installed); DOCX/Markdown
+            headings, code functions, spreadsheet sheets/tables; structure-aware text
+            otherwise.
         recursive: structure-aware text splitting -- headings, then blank lines,
             then lines, then sentences; never inside a code fence or table row.
         fixed: fixed-size windows of ``chunk_size`` words that only break between
             lines (a single over-long line is split on sentences/words).
         semantic: embedding-based topic boundaries, ``chunk_size`` as a maximum.
-        layout: PDFs only -- the layout-model Markdown that ``parse()`` returns, split
+        layout: PDFs -- the layout-model Markdown that ``parse()`` returns, split
             on headings (hard cuts at levels 1-2), never inside a table or figure
             line, with page numbers; other formats get their ``auto`` chunker.
+        structural: PDFs -- the structural chunker, which parses the file itself
+            (no OCR, its own Markdown tables; offsets index its own text); other
+            formats get their ``auto`` chunker.
     """
     validate_chunk_options(strategy, chunk_size, overlap, embedding_model)
-    if strategy == "layout" and ext == ".pdf":
+    if ext == ".pdf" and strategy in ("auto", "layout", "structural"):
+        if strategy == "structural" or (strategy == "auto" and not _layout_available()):
+            from ..chunking.strategies.structural_pdf_chunker import StructuralPDFChunker
+
+            return StructuralPDFChunker(target_size=chunk_size, overlap=overlap)
         from ..chunking.strategies.layout_pdf_chunker import LayoutPDFChunker
 
         return LayoutPDFChunker(target_size=chunk_size, overlap=overlap)
@@ -203,6 +213,15 @@ def build_chunker(
     return chunker_cls(target_size=chunk_size, overlap=overlap)
 
 
+def _layout_available() -> bool:
+    """True when the PDF extractor runs the pymupdf-layout model."""
+    try:
+        from ..extractors.pdf_layout import LAYOUT_AVAILABLE
+    except ImportError:  # pragma: no cover - pymupdf4llm missing
+        return False
+    return bool(LAYOUT_AVAILABLE)
+
+
 @dataclass
 class ChunkingOutcome:
     """Chunks plus the RawDocument they came from (None when extraction was skipped)."""
@@ -227,15 +246,15 @@ def chunk_document(
 ) -> ChunkingOutcome:
     """Chunk ``path`` with the shared factory.
 
-    PDFs on the ``auto`` strategy are chunked straight from the file by the
-    structural chunker, skipping the Markdown extraction pass it does not need
-    (the extractor runs only if the structural parse fails). Every other strategy
-    chunks the extracted text, so ``ocr`` and ``table_format`` apply to it, and it
-    shares the cached extraction with ``parse()``.
+    PDFs are chunked from the extracted text (``layout``, the ``auto`` choice), so
+    ``ocr`` and ``table_format`` apply and the extraction is shared with
+    ``parse()``. The ``structural`` strategy instead chunks straight from the
+    file, skipping extraction (which runs only if the structural parse fails).
 
     Raises:
         ValueError: unsupported format, bad option, or ``ocr``/``table_format``
-            set for a PDF on the ``auto`` strategy (which does not extract text).
+            set for a PDF on the ``structural`` strategy (which does not extract
+            text).
     """
     ext = path.suffix.lower()
     extractor_class_for(path)  # fail fast on unsupported formats
@@ -243,10 +262,10 @@ def chunk_document(
     chunker = build_chunker(ext, strategy, chunk_size, overlap, embedding_model)
     if options and hasattr(chunker, "chunk_path"):
         raise ValueError(
-            "ocr and table_format apply to extracted PDF text, but the 'auto' strategy "
-            "chunks PDFs with the structural chunker, which reads the file directly "
-            "(no OCR, Markdown tables). Use strategy 'layout' to chunk the extracted text "
-            f"with these options (got {dict(options)})."
+            "ocr and table_format apply to extracted PDF text, but the 'structural' "
+            "strategy reads the PDF file directly (no OCR, its own Markdown tables). "
+            "Use strategy 'auto' or 'layout' to chunk the extracted text with these "
+            f"options (got {dict(options)})."
         )
 
     chunks: list[Any] | None = None

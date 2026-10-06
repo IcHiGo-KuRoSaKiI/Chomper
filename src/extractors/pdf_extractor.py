@@ -179,7 +179,7 @@ class PDFExtractor(BaseExtractor):
 
     def _extract_with_layout(self, file_path: str, pdf_document) -> tuple:
         """Markdown, figures and scanned-page handling from the layout model."""
-        from .pdf_layout import extract_with_layout
+        from .pdf_layout import extract_with_layout, join_pages
 
         rasters = [self._extract_page_images(pdf_document, i) for i in range(len(pdf_document))]
         result = extract_with_layout(
@@ -212,7 +212,7 @@ class PDFExtractor(BaseExtractor):
                 "content": content,
                 "markdown_text": layout_page.text,
             })
-        full_text = "\n\n".join(page.text.strip("\n") for page in result.pages if page.text.strip())
+        full_text = join_pages([page.text for page in result.pages])
         return full_text, pages
 
     def _extract_with_markdown(self, file_path: str, pdf_document) -> tuple:

@@ -36,6 +36,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from ...models.document import Chunk, RawDocument
+from ...pdf_structure.sentences import ends_mid_sentence
 from ..base import BaseChunker
 from ..text_splitter import (
     BLOCK,
@@ -205,51 +206,6 @@ def mask_spans(text: str, spans: list[tuple[int, int]]) -> str:
         cursor = end
     parts.append(text[cursor:])
     return "".join(parts)
-
-
-#: Bullet and tick glyphs ``ends_mid_sentence`` treats as trailing enumeration.
-_ENUM_GLYPHS = frozenset("\u2713\u2714\u2717\u2718\u25cb\u25cf\u2022")
-
-
-def ends_mid_sentence(text: str) -> bool:
-    """Linear-time equivalent of :func:`src.pdf_structure.sentences.ends_mid_sentence`.
-
-    The original strips trailing enumeration with
-    ``(?:[\\s\\u00a0]*(?:\\d{1,2}|<glyph>))+$``, which backtracks exponentially
-    on a long digit run (``2019202020212022...`` from chart axes) and can hang for
-    minutes. Anchored at the end, that pattern removes exactly the trailing run of
-    whitespace, digits and glyphs, which a right-strip does in linear time. Every
-    other step is the same.
-    """
-    from ...pdf_structure.sentences import ABBREVIATIONS
-
-    stripped = text.rstrip()
-    if not stripped:
-        return False
-    last = stripped.splitlines()[-1].strip()
-    if not last:
-        return False
-    if last.startswith(("|", "```", "#", ">")):
-        return False
-    if re.match(r"^\s*([-*+\u2022]|\d+[.)])\s", last):
-        return False
-    if last.endswith((":", ";")):
-        return False
-    end = len(last)
-    while end and (last[end - 1].isspace() or last[end - 1].isdecimal() or last[end - 1] in _ENUM_GLYPHS):
-        end -= 1
-    last = last[:end].rstrip()
-    if not last or last.endswith((":", ";")):
-        return False
-    if re.match(r"^[\d\s.,)(]+$", last):
-        return False
-    if len(last.split()) <= 3:
-        return False
-    if sum(1 for c in last if c.isalpha()) < 2:
-        return False
-    if last.endswith((".", "!", "?", '"', "'", ")", "]", "\u2026")):
-        return any(last.endswith(abbr) for abbr in ABBREVIATIONS)
-    return True
 
 
 def prose_ends_mid_sentence(text: str) -> bool:

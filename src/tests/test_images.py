@@ -109,7 +109,12 @@ def test_image_only_pdf_degrades_gracefully(image_only_pdf_path: Path):
     assert parsed.metadata["no_text_layer"] is True
     assert parsed.metadata["pages_without_text_layer"] == [1]
     assert "OCR" in parsed.metadata["warning"]
-    assert chomper.chunk(str(image_only_pdf_path)) == []
+    # The default (layout) chunker chunks parse() text, marker included; the
+    # structural chunker, which reads the file, finds no text.
+    chunks = chomper.chunk(str(image_only_pdf_path))
+    assert [c.text for c in chunks] == [parsed.text]
+    assert chunks[0].metadata["image_ids"] == ["p1-1"]
+    assert chomper.chunk(str(image_only_pdf_path), strategy="structural") == []
 
 
 def test_pdf_repeated_logo_is_deduped_but_page_filter_keeps_it(pdf_path: Path):
@@ -215,7 +220,8 @@ def test_mcp_parse_and_metadata_count_pptx_images(pptx_path: Path):
 def test_legacy_ppt_gives_a_clear_error(tmp_path: Path):
     path = tmp_path / "old.ppt"
     path.write_bytes(b"\xd0\xcf\x11\xe0 not a zip")
-    with pytest.raises(ValueError, match="pptx"):
+    # Rejected up front, like any format Chomper cannot read (ChomperError).
+    with pytest.raises(chomper.ChomperError, match="pptx"):
         chomper.parse(str(path))
 
 

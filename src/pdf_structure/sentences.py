@@ -210,11 +210,27 @@ def split_paragraphs(text: str) -> list[str]:
     return paragraphs
 
 
-#: Trailing enumeration tokens: a bare list number or a bullet/tick glyph left at
-#: the end of a run. Generic layout artefacts, not sentence content.
-_TRAILING_ENUMERATION = re.compile(
-    r"(?:[\s\u00a0]*(?:\d{1,2}|[\u2713\u2714\u2717\u2718\u25cb\u25cf\u2022]))+$"
-)
+#: Bullet and tick glyphs left at the end of a run as enumeration, not content.
+ENUMERATION_GLYPHS = frozenset("\u2713\u2714\u2717\u2718\u25cb\u25cf\u2022")
+
+
+def strip_trailing_enumeration(text: str) -> str:
+    """``text`` without its trailing run of whitespace, digits and bullet/tick glyphs.
+
+    Trailing list numbers and glyphs are layout artefacts, not sentence content.
+    This used to be the regex ``(?:[\\s\\u00a0]*(?:\\d{1,2}|<glyph>))+$``,
+    which removes exactly the same suffix but backtracks exponentially on a digit
+    run that is not at the very end (``2019 2020 2021 ... percent`` from chart
+    axes): ``\\d{1,2}`` can tile n digits in Fibonacci(n) ways, all tried at every
+    start position. It hung for over an hour on a Federal Reserve report. A
+    right-strip is linear.
+    """
+    end = len(text)
+    while end and (
+        text[end - 1].isspace() or text[end - 1].isdecimal() or text[end - 1] in ENUMERATION_GLYPHS
+    ):
+        end -= 1
+    return text[:end]
 
 
 def ends_mid_sentence(text: str) -> bool:
@@ -245,7 +261,7 @@ def ends_mid_sentence(text: str) -> bool:
         return False
 
     # Strip trailing enumeration and glyphs before judging the tail.
-    last = _TRAILING_ENUMERATION.sub("", last).rstrip()
+    last = strip_trailing_enumeration(last)
     if not last:
         return False
     if last.endswith((":", ";")):

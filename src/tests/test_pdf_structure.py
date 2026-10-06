@@ -502,7 +502,8 @@ class TestTables:
             ]
         )
 
-        chunks = chomper.chunk(path, chunk_size=10, overlap=0)
+        # The structural chunker keeps a table whole, even past chunk_size.
+        chunks = chomper.chunk(path, chunk_size=10, overlap=0, strategy="structural")
         table_chunk = next(chunk for chunk in chunks if "| Name |" in chunk.text)
         assert expected in table_chunk.text
         assert expected in chomper.parse(path).text
@@ -510,6 +511,21 @@ class TestTables:
         pipe_rows = [line for line in table_chunk.text.splitlines() if line.startswith("|")]
         assert len(pipe_rows) == 6
         assert all(len(re.findall(r"(?<!\\)\|", line)) == 5 for line in pipe_rows)
+
+        # The default (layout) chunker splits an oversized table between rows and
+        # repeats the header, so every piece is the same canonical table.
+        expected_rows = expected.splitlines()
+        pieces = [c.text for c in chomper.chunk(path, chunk_size=10, overlap=0) if "| Name |" in c.text]
+        assert len(pieces) > 1
+        data_rows = []
+        for piece in pieces:
+            lines = piece.splitlines()
+            assert lines[:2] == expected_rows[:2]
+            assert all(len(re.findall(r"(?<!\\)\|", line)) == 5 for line in lines)
+            data_rows.extend(lines[2:])
+        assert data_rows == expected_rows[2:]
+        whole = chomper.chunk(path, overlap=0)
+        assert sum(expected in c.text for c in whole) == 1
 
     def test_two_page_table_repeats_header_for_continuation(self, tmp_path):
         """A headerless page continuation remains data and gets the original header."""
@@ -909,11 +925,15 @@ class TestStructuralChunker:
             assert chunk.metadata["chunk_strategy"].startswith("structural")
             assert chunk.metadata["source_hash"]
 
-    def test_is_registered_as_default_pdf_chunker(self):
+    def test_is_selectable_by_name_while_layout_is_the_default(self):
         from src.chunking.strategies import StructuralPDFChunker
+        from src.chunking.strategies.layout_pdf_chunker import LayoutPDFChunker
         from src.server.config import CHUNKERS
+        from src.server.documents import build_chunker
 
-        assert CHUNKERS.get(".pdf") is StructuralPDFChunker
+        assert CHUNKERS.get(".pdf") is LayoutPDFChunker
+        assert type(build_chunker(".pdf", "auto")) is LayoutPDFChunker
+        assert type(build_chunker(".pdf", "structural")) is StructuralPDFChunker
 
     def test_markdown_fallback_path(self, fixture_dir):
         """With no usable source path, the fallback still respects headings."""

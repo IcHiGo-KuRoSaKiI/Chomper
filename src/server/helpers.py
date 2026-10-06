@@ -18,7 +18,7 @@ from typing import Any, TypeVar
 
 from mcp.types import TextContent
 
-from .config import EXTRACTORS, MAX_BYTES_INPUT, supported_extensions_hint
+from .config import EXTRACTORS, MAX_BYTES_INPUT, UNREADABLE_FORMATS, supported_extensions_hint
 from .documents import (
     build_chunker,
     extractor_class_for,
@@ -211,7 +211,7 @@ def parse_from_base64(content_base64: str, filename: str) -> tuple[Path, None]:
         )
     if ext not in EXTRACTORS:
         reason = EXTRACTORS.unavailable_reason(ext)
-        if ext in EXTRACTORS.known() and reason:
+        if (ext in EXTRACTORS.known() or ext in UNREADABLE_FORMATS) and reason:
             raise ValueError(reason)
         raise ValueError(
             f"Unsupported file format: {ext}. Supported formats: {supported_extensions_hint()}"

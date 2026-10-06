@@ -1,0 +1,2348 @@
+{
+"source": "45 CFR part 164 (2023 edition), govinfo.gov, PDF pages 2-7; US Government work, public domain. pymupdf4llm 1.28.2 layout parse (to_markdown page_chunks): text, page_boxes and page size per page.",
+"pages": [
+{
+"text": "## § 164.102 \n\n# Subpart A—General Provisions \n\n### **§ 164.102 Statutory basis.** \n\nThe provisions of this part are adopted pursuant to the Secretary’s authority to prescribe standards, requirements, and implementation specifications under part C of title XI of the Act, section 264 of Public Law 104–191, and sections 13400–13424 of Public Law 111–5. \n\n[78 FR 5692, Jan. 25, 2013] \n\n### **§ 164.103 Definitions.** \n\nAs used in this part, the following terms have the following meanings: _Common control_ exists if an entity has the power, directly or indirectly, significantly to influence or direct the actions or policies of another entity. \n\n_Common ownership_ exists if an entity or entities possess an ownership or equity interest of 5 percent or more in another entity. \n\n_Covered functions_ means those functions of a covered entity the performance of which makes the entity a health plan, health care provider, or health care clearinghouse. \n\n_Health care component_ means a component or combination of components of a hybrid entity designated by the hybrid entity in accordance with § 164.105(a)(2)(iii)(D). \n\n_Hybrid entity_ means a single legal entity: \n\n(1) That is a covered entity; \n\n(2) Whose business activities include both covered and non-covered functions; and \n\n(3) That designates health care components in accordance with paragraph § 164.105(a)(2)(iii)(D). \n\n_Law enforcement official_ means an officer or employee of any agency or authority of the United States, a State, a territory, a political subdivision of a State or territory, or an Indian tribe, who is empowered by law to: \n\n(1) Investigate or conduct an official inquiry into a potential violation of law; or \n\n(2) Prosecute or otherwise conduct a criminal, civil, or administrative proceeding arising from an alleged violation of law. \n\n## 45 CFR Subtitle A (10–1–23 Edition) \n\n_Plan sponsor_ is defined as defined at section 3(16)(B) of ERISA, 29 U.S.C. 1002(16)(B). \n\n_Required by law_ means a mandate contained in law that compels an entity to make a use or disclosure of protected health information and that is enforceable in a court of law. _Required by law_ includes, but is not limited to, court orders and court-ordered warrants; subpoenas or summons issued by a court, grand jury, a governmental or tribal inspector general, or an administrative body authorized to require the production of information; a civil or an authorized investigative demand; Medicare conditions of participation with respect to health care providers participating in the program; and statutes or regulations that require the production of information, including statutes or regulations that require such information if payment is sought under a government program providing public benefits. \n\n[68 FR 8374, Feb. 20, 2003, as amended at 74 FR 42767, Aug. 24, 2009; 78 FR 34266, June 7, 2013] \n\n### **§ 164.104 Applicability.** \n\n(a) Except as otherwise provided, the standards, requirements, and implementation specifications adopted under this part apply to the following entities: \n\n(1) A health plan. \n\n(2) A health care clearinghouse. \n\n(3) A health care provider who transmits any health information in electronic form in connection with a transaction covered by this subchapter. \n\n(b) Where provided, the standards, requirements, and implementation specifications adopted under this part apply to a business associate. \n\n[68 FR 8375, Feb. 20, 2003, as amended at 78 FR 5692, Jan. 25, 2013] \n\n### **§ 164.105 Organizational requirements.** \n\n(a)(1) _Standard: Health care component._ If a covered entity is a hybrid entity, the requirements of this part, other than the requirements of this section, §§ 164.314, and 164.504, apply only to the health care component(s) of the entity, as specified in this section. \n\n(2) _Implementation specifications:_ \n\n630 \n\nVerDate Sep<11>2014 11:32 Nov 02, 2023 Jkt 259202 PO 00000 Frm 00640 Fmt 8010 Sfmt 8010 Q:\\45\\45V2.TXT PC31 \n\n",
+"boxes": [
+{
+"class": "page-header",
+"bbox": [
+18,
+680,
+24,
+774
+],
+"pos": [
+0,
+0
+]
+},
+{
+"class": "section-header",
+"bbox": [
+132,
+159,
+174,
+168
+],
+"pos": [
+0,
+15
+]
+},
+{
+"class": "section-header",
+"bbox": [
+142,
+178,
+293,
+188
+],
+"pos": [
+15,
+48
+]
+},
+{
+"class": "section-header",
+"bbox": [
+132,
+196,
+244,
+205
+],
+"pos": [
+48,
+85
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+209,
+303,
+281
+],
+"pos": [
+85,
+355
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+288,
+226,
+295
+],
+"pos": [
+355,
+385
+]
+},
+{
+"class": "section-header",
+"bbox": [
+132,
+304,
+227,
+312
+],
+"pos": [
+385,
+418
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+317,
+303,
+372
+],
+"pos": [
+418,
+647
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+374,
+303,
+409
+],
+"pos": [
+647,
+780
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+411,
+303,
+456
+],
+"pos": [
+780,
+953
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+458,
+303,
+502
+],
+"pos": [
+953,
+1121
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+504,
+301,
+521
+],
+"pos": [
+1121,
+1168
+]
+},
+{
+"class": "text",
+"bbox": [
+140,
+523,
+261,
+531
+],
+"pos": [
+1168,
+1200
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+533,
+303,
+559
+],
+"pos": [
+1200,
+1284
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+561,
+303,
+587
+],
+"pos": [
+1284,
+1383
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+589,
+303,
+643
+],
+"pos": [
+1383,
+1609
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+645,
+303,
+671
+],
+"pos": [
+1609,
+1696
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+673,
+303,
+707
+],
+"pos": [
+1696,
+1823
+]
+},
+{
+"class": "section-header",
+"bbox": [
+330,
+159,
+483,
+168
+],
+"pos": [
+1823,
+1864
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+178,
+483,
+204
+],
+"pos": [
+1864,
+1956
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+206,
+483,
+403
+],
+"pos": [
+1956,
+2765
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+411,
+483,
+433
+],
+"pos": [
+2765,
+2864
+]
+},
+{
+"class": "section-header",
+"bbox": [
+312,
+442,
+414,
+451
+],
+"pos": [
+2864,
+2899
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+455,
+483,
+498
+],
+"pos": [
+2899,
+3055
+]
+},
+{
+"class": "text",
+"bbox": [
+320,
+501,
+396,
+509
+],
+"pos": [
+3055,
+3076
+]
+},
+{
+"class": "text",
+"bbox": [
+320,
+511,
+457,
+519
+],
+"pos": [
+3076,
+3111
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+521,
+481,
+556
+],
+"pos": [
+3111,
+3257
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+558,
+483,
+591
+],
+"pos": [
+3257,
+3397
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+599,
+483,
+614
+],
+"pos": [
+3397,
+3468
+]
+},
+{
+"class": "section-header",
+"bbox": [
+312,
+623,
+482,
+632
+],
+"pos": [
+3468,
+3517
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+636,
+483,
+698
+],
+"pos": [
+3517,
+3790
+]
+},
+{
+"class": "text",
+"bbox": [
+320,
+700,
+456,
+708
+],
+"pos": [
+3790,
+3829
+]
+},
+{
+"class": "text",
+"bbox": [
+298,
+718,
+317,
+727
+],
+"pos": [
+3829,
+3835
+]
+},
+{
+"class": "page-footer",
+"bbox": [
+25,
+767,
+419,
+774
+],
+"pos": [
+3835,
+3945
+]
+}
+],
+"width": 612.0,
+"height": 792.0
+},
+{
+"text": "§ 164.105 \n\n## Dept. of Health and Human Services \n\n(i) _Application of other provisions._ In applying a provision of this part, other than the requirements of this section, §§ 164.314, and 164.504, to a hybrid entity: \n\n(A) A reference in such provision to a ‘‘covered entity’’ refers to a health care component of the covered entity; \n\n(B) A reference in such provision to a ‘‘health plan,’’ ‘‘covered health care provider,’’ or ‘‘health care clearinghouse,’’ refers to a health care component of the covered entity if such health care component performs the functions of a health plan, health care provider, or health care clearinghouse, as applicable; \n\n(C) A reference in such provision to ‘‘protected health information’’ refers to protected health information that is created or received by or on behalf of the health care component of the covered entity; and \n\n(D) A reference in such provision to ‘‘electronic protected health information’’ refers to electronic protected health information that is created, received, maintained, or transmitted by or on behalf of the health care component of the covered entity. \n\n(ii) _Safeguard requirements._ The covered entity that is a hybrid entity must ensure that a health care component of the entity complies with the applicable requirements of this part. In particular, and without limiting this requirement, such covered entity must ensure that: \n\n(A) Its health care component does not disclose protected health information to another component of the covered entity in circumstances in which subpart E of this part would prohibit such disclosure if the health care component and the other component were separate and distinct legal entities; \n\n(B) Its health care component protects electronic protected health information with respect to another component of the covered entity to the same extent that it would be required under subpart C of this part to protect such information if the health care component and the other component were separate and distinct legal entities; \n\n(C) If a person performs duties for both the health care component in the capacity of a member of the workforce of such component and for another \n\ncomponent of the entity in the same capacity with respect to that component, such workforce member must not use or disclose protected health information created or received in the course of or incident to the member’s work for the health care component in a way prohibited by subpart E of this part. \n\n(iii) _Responsibilities of the covered entity._ A covered entity that is a hybrid entity has the following responsibilities: \n\n(A) For purposes of subpart C of part 160 of this subchapter, pertaining to compliance and enforcement, the covered entity has the responsibility of complying with this part. \n\n(B) The covered entity is responsible for complying with §§ 164.316(a) and 164.530(i), pertaining to the implementation of policies and procedures to ensure compliance with applicable requirements of this part, including the safeguard requirements in paragraph (a)(2)(ii) of this section. \n\n(C) The covered entity is responsible for complying with §§ 164.314 and 164.504 regarding business associate arrangements and other organizational requirements. \n\n(D) The covered entity is responsible for designating the components that are part of one or more health care components of the covered entity and documenting the designation in accordance with paragraph (c) of this section, provided that, if the covered entity designates one or more health care components, it must include any component that would meet the definition of a covered entity or business associate if it were a separate legal entity. Health care component(s) also may include a component only to the extent that it performs covered functions. \n\n(b)(1) _Standard: Affiliated covered entities._ Legally separate covered entities that are affiliated may designate themselves as a single covered entity for purposes of this part. \n\n(2) _Implementation specifications_ —(i) _Requirements for designation of an affiliated covered entity._ (A) Legally separate covered entities may designate themselves (including any health care component of such covered entity) as a single affiliated covered entity, for purposes of this part, if all of the covered \n\n631 \n\nVerDate Sep<11>2014 11:32 Nov 02, 2023 Jkt 259202 PO 00000 Frm 00641 Fmt 8010 Sfmt 8010 Q:\\45\\45V2.TXT PC31 \n\n",
+"boxes": [
+{
+"class": "page-header",
+"bbox": [
+440,
+159,
+483,
+168
+],
+"pos": [
+0,
+12
+]
+},
+{
+"class": "page-header",
+"bbox": [
+18,
+680,
+24,
+774
+],
+"pos": [
+12,
+12
+]
+},
+{
+"class": "section-header",
+"bbox": [
+132,
+159,
+294,
+168
+],
+"pos": [
+12,
+52
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+178,
+303,
+222
+],
+"pos": [
+52,
+221
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+223,
+303,
+249
+],
+"pos": [
+221,
+338
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+250,
+303,
+330
+],
+"pos": [
+338,
+658
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+331,
+303,
+384
+],
+"pos": [
+658,
+869
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+385,
+303,
+447
+],
+"pos": [
+869,
+1124
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+448,
+303,
+518
+],
+"pos": [
+1124,
+1403
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+520,
+303,
+591
+],
+"pos": [
+1403,
+1701
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+592,
+303,
+672
+],
+"pos": [
+1701,
+2036
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+673,
+303,
+708
+],
+"pos": [
+2036,
+2184
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+178,
+483,
+258
+],
+"pos": [
+2184,
+2486
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+259,
+483,
+293
+],
+"pos": [
+2486,
+2613
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+295,
+483,
+339
+],
+"pos": [
+2613,
+2790
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+340,
+483,
+411
+],
+"pos": [
+2790,
+3081
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+412,
+483,
+456
+],
+"pos": [
+3081,
+3244
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+457,
+483,
+591
+],
+"pos": [
+3244,
+3803
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+592,
+483,
+636
+],
+"pos": [
+3803,
+3986
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+637,
+483,
+708
+],
+"pos": [
+3986,
+4305
+]
+},
+{
+"class": "text",
+"bbox": [
+298,
+718,
+317,
+727
+],
+"pos": [
+4305,
+4311
+]
+},
+{
+"class": "page-footer",
+"bbox": [
+25,
+767,
+419,
+774
+],
+"pos": [
+4311,
+4421
+]
+}
+],
+"width": 612.0,
+"height": 792.0
+},
+{
+"text": "## § 164.106 \n\nentities designated are under common ownership or control. \n\n(B) The designation of an affiliated covered entity must be documented and the documentation maintained as required by paragraph (c) of this section. \n\n(ii) _Safeguard requirements._ An affiliated covered entity must ensure that it complies with the applicable requirements of this part, including, if the affiliated covered entity combines the functions of a health plan, health care provider, or health care clearinghouse, §§ 164.308(a)(4)(ii)(A) and 164.504(g), as applicable. \n\n(c)(1) _Standard: Documentation._ A covered entity must maintain a written or electronic record of a designation as required by paragraphs (a) or (b) of this section. \n\n(2) _Implementation specification: Retention period._ A covered entity must retain the documentation as required by paragraph (c)(1) of this section for 6 years from the date of its creation or the date when it last was in effect, whichever is later. \n\n[68 FR 8375, Feb. 20, 2003, as amended at 78 FR 5692, Jan. 25, 2013] \n\n### **§ 164.106 Relationship to other parts.** \n\nIn complying with the requirements of this part, covered entities and, where provided, business associates, are required to comply with the applicable provisions of parts 160 and 162 of this subchapter. \n\n[78 FR 5693, Jan. 25, 2013] \n\n# Subpart B **[** Reserved **]** \n\n# Subpart C—Security Standards for the Protection of Electronic Protected Health Information \n\nAUTHORITY: 42 U.S.C. 1320d–2 and 1320d–4; sec. 13401, Pub. L. 111–5, 123 Stat. 260. \n\nSOURCE: 68 FR 8376, Feb. 20, 2003, unless otherwise noted. \n\n### **§ 164.302 Applicability.** \n\nA covered entity or business associate must comply with the applicable standards, implementation specifications, and requirements of this subpart \n\n## 45 CFR Subtitle A (10–1–23 Edition) \n\nwith respect to electronic protected health information of a covered entity. \n\n[78 FR 5693, Jan. 25, 2013] \n\n### **§ 164.304 Definitions.** \n\nAs used in this subpart, the following terms have the following meanings: _Access_ means the ability or the means necessary to read, write, modify, or communicate data/information or otherwise use any system resource. (This definition applies to ‘‘access’’ as used in this subpart, not as used in subparts D or E of this part.) \n\n_Administrative safeguards_ are administrative actions, and policies and procedures, to manage the selection, development, implementation, and maintenance of security measures to protect electronic protected health information and to manage the conduct of the covered entity’s or business associate’s workforce in relation to the protection of that information. \n\n_Authentication_ means the corroboration that a person is the one claimed. \n\n_Availability_ means the property that data or information is accessible and useable upon demand by an authorized person. \n\n_Confidentiality_ means the property that data or information is not made available or disclosed to unauthorized persons or processes. \n\n_Encryption_ means the use of an algorithmic process to transform data into a form in which there is a low probability of assigning meaning without use of a confidential process or key. \n\n_Facility_ means the physical premises and the interior and exterior of a building(s). \n\n_Information system_ means an interconnected set of information resources under the same direct management control that shares common functionality. A system normally includes hardware, software, information, data, applications, communications, and people. \n\n_Integrity_ means the property that data or information have not been altered or destroyed in an unauthorized manner. \n\n_Malicious software_ means software, for example, a virus, designed to damage or disrupt a system. \n\n632 \n\nVerDate Sep<11>2014 11:32 Nov 02, 2023 Jkt 259202 PO 00000 Frm 00642 Fmt 8010 Sfmt 8010 Q:\\45\\45V2.TXT PC31 \n\n",
+"boxes": [
+{
+"class": "page-header",
+"bbox": [
+18,
+680,
+24,
+774
+],
+"pos": [
+0,
+0
+]
+},
+{
+"class": "section-header",
+"bbox": [
+132,
+159,
+174,
+168
+],
+"pos": [
+0,
+15
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+178,
+303,
+195
+],
+"pos": [
+15,
+76
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+197,
+303,
+239
+],
+"pos": [
+76,
+228
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+242,
+303,
+322
+],
+"pos": [
+228,
+558
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+324,
+303,
+367
+],
+"pos": [
+558,
+727
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+370,
+303,
+430
+],
+"pos": [
+727,
+980
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+438,
+303,
+453
+],
+"pos": [
+980,
+1051
+]
+},
+{
+"class": "section-header",
+"bbox": [
+132,
+462,
+294,
+470
+],
+"pos": [
+1051,
+1100
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+475,
+303,
+528
+],
+"pos": [
+1100,
+1305
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+534,
+226,
+541
+],
+"pos": [
+1305,
+1335
+]
+},
+{
+"class": "section-header",
+"bbox": [
+164,
+552,
+270,
+562
+],
+"pos": [
+1335,
+1370
+]
+},
+{
+"class": "section-header",
+"bbox": [
+131,
+573,
+303,
+601
+],
+"pos": [
+1370,
+1465
+]
+},
+{
+"class": "text",
+"bbox": [
+131,
+616,
+303,
+631
+],
+"pos": [
+1465,
+1551
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+636,
+303,
+650
+],
+"pos": [
+1551,
+1612
+]
+},
+{
+"class": "section-header",
+"bbox": [
+132,
+660,
+234,
+669
+],
+"pos": [
+1612,
+1647
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+673,
+303,
+708
+],
+"pos": [
+1647,
+1795
+]
+},
+{
+"class": "section-header",
+"bbox": [
+330,
+159,
+483,
+168
+],
+"pos": [
+1795,
+1836
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+178,
+483,
+195
+],
+"pos": [
+1836,
+1915
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+201,
+406,
+208
+],
+"pos": [
+1915,
+1945
+]
+},
+{
+"class": "section-header",
+"bbox": [
+312,
+217,
+407,
+225
+],
+"pos": [
+1945,
+1978
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+230,
+483,
+312
+],
+"pos": [
+1978,
+2308
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+314,
+483,
+402
+],
+"pos": [
+2308,
+2672
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+405,
+480,
+422
+],
+"pos": [
+2672,
+2749
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+424,
+483,
+459
+],
+"pos": [
+2749,
+2873
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+461,
+483,
+497
+],
+"pos": [
+2873,
+3010
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+498,
+483,
+543
+],
+"pos": [
+3010,
+3198
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+544,
+483,
+570
+],
+"pos": [
+3198,
+3287
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+572,
+483,
+643
+],
+"pos": [
+3287,
+3546
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+645,
+483,
+679
+],
+"pos": [
+3546,
+3666
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+682,
+483,
+708
+],
+"pos": [
+3666,
+3767
+]
+},
+{
+"class": "text",
+"bbox": [
+298,
+718,
+317,
+727
+],
+"pos": [
+3767,
+3773
+]
+},
+{
+"class": "page-footer",
+"bbox": [
+25,
+767,
+419,
+774
+],
+"pos": [
+3773,
+3883
+]
+}
+],
+"width": 612.0,
+"height": 792.0
+},
+{
+"text": "§ 164.306 \n\n## Dept. of Health and Human Services \n\n_Password_ means confidential authentication information composed of a string of characters. \n\n_Physical safeguards_ are physical measures, policies, and procedures to protect a covered entity’s or business associate’s electronic information systems and related buildings and equipment, from natural and environmental hazards, and unauthorized intrusion. \n\n_Security or Security measures_ encompass all of the administrative, physical, and technical safeguards in an information system. \n\n_Security incident_ means the attempted or successful unauthorized access, use, disclosure, modification, or destruction of information or interference with system operations in an information system. \n\n_Technical safeguards_ means the technology and the policy and procedures for its use that protect electronic protected health information and control access to it. \n\n_User_ means a person or entity with authorized access. \n\n_Workstation_ means an electronic computing device, for example, a laptop or desktop computer, or any other device that performs similar functions, and electronic media stored in its immediate environment. \n\n[68 FR 8376, Feb. 20, 2003, as amended at 74 FR 42767, Aug. 24, 2009; 78 FR 5693, Jan. 25, 2013] \n\n### **§ 164.306 Security standards: General rules.** \n\n(a) _General requirements._ Covered entities and business associates must do the following: \n\n(1) Ensure the confidentiality, integrity, and availability of all electronic protected health information the covered entity or business associate creates, receives, maintains, or transmits. \n\n(2) Protect against any reasonably anticipated threats or hazards to the security or integrity of such information. \n\n(3) Protect against any reasonably anticipated uses or disclosures of such information that are not permitted or required under subpart E of this part. \n\n(4) Ensure compliance with this subpart by its workforce. \n\n(b) _Flexibility of approach._ (1) Covered entities and business associates may \n\nuse any security measures that allow the covered entity or business associate to reasonably and appropriately implement the standards and implementation specifications as specified in this subpart. \n\n(2) In deciding which security measures to use, a covered entity or business associate must take into account the following factors: \n\n(i) The size, complexity, and capabilities of the covered entity or business associate. \n\n(ii) The covered entity’s or the business associate’s technical infrastructure, hardware, and software security capabilities. \n\n(iii) The costs of security measures. \n\n(iv) The probability and criticality of potential risks to electronic protected health information. \n\n(c) _Standards._ A covered entity or business associate must comply with the applicable standards as provided in this section and in §§ 164.308, 164.310, 164.312, 164.314 and 164.316 with respect to all electronic protected health information. \n\n(d) _Implementation specifications._ In this subpart: \n\n(1) Implementation specifications are required or addressable. If an implementation specification is required, the word ‘‘Required’’ appears in parentheses after the title of the implementation specification. If an implementation specification is addressable, the word ‘‘Addressable’’ appears in parentheses after the title of the implementation specification. \n\n(2) When a standard adopted in § 164.308, § 164.310, § 164.312, § 164.314, or § 164.316 includes required implementation specifications, a covered entity or business associate must implement the implementation specifications. \n\n(3) When a standard adopted in § 164.308, § 164.310, § 164.312, § 164.314, or § 164.316 includes addressable implementation specifications, a covered entity or business associate must— \n\n(i) Assess whether each implementation specification is a reasonable and appropriate safeguard in its environment, when analyzed with reference to the likely contribution to protecting electronic protected health information; and \n\n633 \n\nVerDate Sep<11>2014 11:32 Nov 02, 2023 Jkt 259202 PO 00000 Frm 00643 Fmt 8010 Sfmt 8010 Q:\\45\\45V2.TXT PC31 \n\n",
+"boxes": [
+{
+"class": "page-header",
+"bbox": [
+440,
+159,
+483,
+168
+],
+"pos": [
+0,
+12
+]
+},
+{
+"class": "page-header",
+"bbox": [
+18,
+680,
+24,
+774
+],
+"pos": [
+12,
+12
+]
+},
+{
+"class": "section-header",
+"bbox": [
+132,
+159,
+294,
+168
+],
+"pos": [
+12,
+52
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+178,
+303,
+204
+],
+"pos": [
+52,
+147
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+205,
+303,
+266
+],
+"pos": [
+147,
+409
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+267,
+303,
+302
+],
+"pos": [
+409,
+541
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+303,
+303,
+356
+],
+"pos": [
+541,
+744
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+357,
+303,
+400
+],
+"pos": [
+744,
+911
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+402,
+303,
+418
+],
+"pos": [
+911,
+969
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+420,
+303,
+471
+],
+"pos": [
+969,
+1177
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+478,
+303,
+501
+],
+"pos": [
+1177,
+1276
+]
+},
+{
+"class": "section-header",
+"bbox": [
+132,
+509,
+303,
+524
+],
+"pos": [
+1276,
+1331
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+529,
+303,
+555
+],
+"pos": [
+1331,
+1425
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+556,
+303,
+600
+],
+"pos": [
+1425,
+1619
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+601,
+303,
+635
+],
+"pos": [
+1619,
+1737
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+637,
+303,
+672
+],
+"pos": [
+1737,
+1891
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+673,
+301,
+690
+],
+"pos": [
+1891,
+1951
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+691,
+303,
+708
+],
+"pos": [
+1951,
+2033
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+178,
+483,
+231
+],
+"pos": [
+2033,
+2233
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+233,
+483,
+268
+],
+"pos": [
+2233,
+2368
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+270,
+483,
+294
+],
+"pos": [
+2368,
+2458
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+297,
+483,
+332
+],
+"pos": [
+2458,
+2586
+]
+},
+{
+"class": "text",
+"bbox": [
+320,
+334,
+475,
+342
+],
+"pos": [
+2586,
+2626
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+344,
+483,
+369
+],
+"pos": [
+2626,
+2728
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+372,
+483,
+433
+],
+"pos": [
+2728,
+2974
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+436,
+483,
+453
+],
+"pos": [
+2974,
+3030
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+454,
+483,
+543
+],
+"pos": [
+3030,
+3393
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+545,
+483,
+598
+],
+"pos": [
+3393,
+3621
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+600,
+483,
+644
+],
+"pos": [
+3621,
+3808
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+646,
+483,
+708
+],
+"pos": [
+3808,
+4040
+]
+},
+{
+"class": "page-footer",
+"bbox": [
+298,
+718,
+317,
+727
+],
+"pos": [
+4040,
+4046
+]
+},
+{
+"class": "page-footer",
+"bbox": [
+25,
+767,
+419,
+774
+],
+"pos": [
+4046,
+4156
+]
+}
+],
+"width": 612.0,
+"height": 792.0
+},
+{
+"text": "## § 164.308 \n\n- (ii) As applicable to the covered enti- \n\n- ty or business associate— \n\n- (A) Implement the implementation \n\n- specification if reasonable and appropriate; or \n\n(B) If implementing the implementation specification is not reasonable and appropriate— \n\n- $( _1_ ) Document why it would not be \n\n- reasonable and appropriate to implement the implementation specification; and \n\n- $( _2_ ) Implement an equivalent alter- \n\n- native measure if reasonable and appropriate. \n\n(e) _Maintenance._ A covered entity or business associate must review and modify the security measures implemented under this subpart as needed to continue provision of reasonable and appropriate protection of electronic protected health information, and update documentation of such security measures in accordance with § 164.316(b)(2)(iii). \n\n- [68 FR 8376, Feb. 20, 2003; 68 FR 17153, Apr. 8, 2003; 78 FR 5693, Jan. 25, 2013] \n\n### **§ 164.308 Administrative safeguards.** \n\n(a) A covered entity or business associate must, in accordance with § 164.306: \n\n(1)(i) _Standard: Security management process._ Implement policies and procedures to prevent, detect, contain, and correct security violations. \n\n(ii) _Implementation specifications:_ \n\n(A) _Risk analysis (Required)._ Conduct an accurate and thorough assessment of the potential risks and vulnerabilities to the confidentiality, integrity, and availability of electronic protected health information held by the covered entity or business associate. \n\n(B) _Risk management (Required)._ Implement security measures sufficient to reduce risks and vulnerabilities to a reasonable and appropriate level to comply with § 164.306(a). \n\n(C) _Sanction policy (Required)._ Apply appropriate sanctions against workforce members who fail to comply with the security policies and procedures of the covered entity or business associate. \n\n(D) _Information system activity review (Required)._ Implement procedures to regularly review records of information system activity, such as audit logs, ac- \n\n## 45 CFR Subtitle A (10–1–23 Edition) \n\ncess reports, and security incident tracking reports. \n\n(2) _Standard: Assigned security responsibility._ Identify the security official who is responsible for the development and implementation of the policies and procedures required by this subpart for the covered entity or business associate. \n\n(3)(i) _Standard: Workforce security._ Implement policies and procedures to ensure that all members of its workforce have appropriate access to electronic protected health information, as provided under paragraph (a)(4) of this section, and to prevent those workforce members who do not have access under paragraph (a)(4) of this section from obtaining access to electronic protected health information. \n\n(ii) _Implementation specifications:_ \n\n(A) _Authorization and/or supervision (Addressable)._ Implement procedures for the authorization and/or supervision of workforce members who work with electronic protected health information or in locations where it might be accessed. \n\n(B) _Workforce clearance procedure (Addressable)._ Implement procedures to determine that the access of a workforce member to electronic protected health information is appropriate. \n\n(C) _Termination procedures (Addressable)._ Implement procedures for terminating access to electronic protected health information when the employment of, or other arrangement with, a workforce member ends or as required by determinations made as specified in paragraph (a)(3)(ii)(B) of this section. \n\n(4)(i) _Standard: Information access management._ Implement policies and procedures for authorizing access to electronic protected health information that are consistent with the applicable requirements of subpart E of this part. \n\n(ii) _Implementation specifications:_ \n\n(A) _Isolating health care clearinghouse functions (Required)._ If a health care clearinghouse is part of a larger organization, the clearinghouse must implement policies and procedures that protect the electronic protected health information of the clearinghouse from unauthorized access by the larger organization. \n\n634 \n\nVerDate Sep<11>2014 11:32 Nov 02, 2023 Jkt 259202 PO 00000 Frm 00644 Fmt 8010 Sfmt 8010 Q:\\45\\45V2.TXT PC31 \n\n",
+"boxes": [
+{
+"class": "page-header",
+"bbox": [
+18,
+680,
+24,
+774
+],
+"pos": [
+0,
+0
+]
+},
+{
+"class": "section-header",
+"bbox": [
+132,
+159,
+174,
+168
+],
+"pos": [
+0,
+15
+]
+},
+{
+"class": "list-item",
+"bbox": [
+132,
+178,
+301,
+195
+],
+"pos": [
+15,
+89
+]
+},
+{
+"class": "list-item",
+"bbox": [
+132,
+196,
+303,
+221
+],
+"pos": [
+89,
+178
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+222,
+303,
+248
+],
+"pos": [
+178,
+268
+]
+},
+{
+"class": "list-item",
+"bbox": [
+132,
+249,
+303,
+283
+],
+"pos": [
+268,
+392
+]
+},
+{
+"class": "list-item",
+"bbox": [
+132,
+284,
+301,
+310
+],
+"pos": [
+392,
+486
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+311,
+303,
+400
+],
+"pos": [
+486,
+831
+]
+},
+{
+"class": "list-item",
+"bbox": [
+132,
+405,
+303,
+420
+],
+"pos": [
+831,
+917
+]
+},
+{
+"class": "section-header",
+"bbox": [
+132,
+428,
+291,
+437
+],
+"pos": [
+917,
+964
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+440,
+303,
+457
+],
+"pos": [
+964,
+1045
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+458,
+303,
+493
+],
+"pos": [
+1045,
+1191
+]
+},
+{
+"class": "text",
+"bbox": [
+140,
+494,
+279,
+502
+],
+"pos": [
+1191,
+1231
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+502,
+303,
+572
+],
+"pos": [
+1231,
+1497
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+574,
+303,
+618
+],
+"pos": [
+1497,
+1675
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+619,
+303,
+671
+],
+"pos": [
+1675,
+1871
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+673,
+303,
+708
+],
+"pos": [
+1871,
+2031
+]
+},
+{
+"class": "section-header",
+"bbox": [
+330,
+159,
+483,
+168
+],
+"pos": [
+2031,
+2072
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+178,
+483,
+195
+],
+"pos": [
+2072,
+2128
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+197,
+483,
+258
+],
+"pos": [
+2128,
+2371
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+261,
+483,
+359
+],
+"pos": [
+2371,
+2777
+]
+},
+{
+"class": "text",
+"bbox": [
+320,
+362,
+459,
+370
+],
+"pos": [
+2777,
+2817
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+372,
+483,
+433
+],
+"pos": [
+2817,
+3054
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+436,
+483,
+480
+],
+"pos": [
+3054,
+3238
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+481,
+483,
+552
+],
+"pos": [
+3238,
+3541
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+554,
+483,
+616
+],
+"pos": [
+3541,
+3773
+]
+},
+{
+"class": "text",
+"bbox": [
+320,
+618,
+459,
+626
+],
+"pos": [
+3773,
+3813
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+628,
+483,
+707
+],
+"pos": [
+3813,
+4132
+]
+},
+{
+"class": "page-footer",
+"bbox": [
+298,
+718,
+317,
+727
+],
+"pos": [
+4132,
+4138
+]
+},
+{
+"class": "page-footer",
+"bbox": [
+25,
+767,
+419,
+774
+],
+"pos": [
+4138,
+4248
+]
+}
+],
+"width": 612.0,
+"height": 792.0
+},
+{
+"text": "§ 164.308 \n\n## Dept. of Health and Human Services \n\n(B) _Access authorization (Addressable)._ Implement policies and procedures for granting access to electronic protected health information, for example, through access to a workstation, transaction, program, process, or other mechanism. \n\n(C) _Access establishment and modification (Addressable)._ Implement policies and procedures that, based upon the covered entity’s or the business associate’s access authorization policies, establish, document, review, and modify a user’s right of access to a workstation, transaction, program, or process. \n\n(5)(i) _Standard: Security awareness and training._ Implement a security awareness and training program for all members of its workforce (including management). \n\n(ii) _Implementation specifications._ Implement: \n\n(A) _Security reminders (Addressable)._ Periodic security updates. \n\n(B) _Protection from malicious software (Addressable)._ Procedures for guarding against, detecting, and reporting malicious software. \n\n(C) _Log-in monitoring (Addressable)._ Procedures for monitoring log-in attempts and reporting discrepancies. \n\n(D) _Password management (Addressable)._ Procedures for creating, changing, and safeguarding passwords. \n\n(6)(i) _Standard: Security incident procedures._ Implement policies and procedures to address security incidents. \n\n(ii) _Implementation specification: Response and reporting (Required)._ Identify and respond to suspected or known security incidents; mitigate, to the extent practicable, harmful effects of security incidents that are known to the covered entity or business associate; and document security incidents and their outcomes. \n\n(7)(i) _Standard: Contingency plan._ Establish (and implement as needed) policies and procedures for responding to an emergency or other occurrence (for example, fire, vandalism, system failure, and natural disaster) that damages systems that contain electronic protected health information. \n\n(ii) _Implementation specifications:_ \n\n(A) _Data backup plan (Required)._ Establish and implement procedures to create and maintain retrievable exact \n\ncopies of electronic protected health information. \n\n(B) _Disaster recovery plan (Required)._ Establish (and implement as needed) procedures to restore any loss of data. \n\n(C) _Emergency mode operation plan (Required)._ Establish (and implement as needed) procedures to enable continuation of critical business processes for protection of the security of electronic protected health information while operating in emergency mode. \n\n(D) _Testing and revision procedures (Addressable)._ Implement procedures for periodic testing and revision of contingency plans. \n\n(E) _Applications and data criticality analysis (Addressable)._ Assess the relative criticality of specific applications and data in support of other contingency plan components. \n\n(8) _Standard: Evaluation._ Perform a periodic technical and nontechnical evaluation, based initially upon the standards implemented under this rule and, subsequently, in response to environmental or operational changes affecting the security of electronic protected health information, that establishes the extent to which a covered entity’s or business associate’s security policies and procedures meet the requirements of this subpart. \n\n(b)(1) _Business associate contracts and other arrangements._ A covered entity may permit a business associate to create, receive, maintain, or transmit electronic protected health information on the covered entity’s behalf only if the covered entity obtains satisfactory assurances, in accordance with § 164.314(a), that the business associate will appropriately safeguard the information. A covered entity is not required to obtain such satisfactory assurances from a business associate that is a subcontractor. \n\n(2) A business associate may permit a business associate that is a subcontractor to create, receive, maintain, or transmit electronic protected health information on its behalf only if the business associate obtains satisfactory assurances, in accordance with § 164.314(a), that the subcontractor will appropriately safeguard the information. \n\n635 \n\nVerDate Sep<11>2014 11:32 Nov 02, 2023 Jkt 259202 PO 00000 Frm 00645 Fmt 8010 Sfmt 8010 Q:\\45\\45V2.TXT PC31 \n\n",
+"boxes": [
+{
+"class": "page-header",
+"bbox": [
+440,
+159,
+483,
+168
+],
+"pos": [
+0,
+12
+]
+},
+{
+"class": "page-header",
+"bbox": [
+18,
+680,
+24,
+774
+],
+"pos": [
+12,
+12
+]
+},
+{
+"class": "section-header",
+"bbox": [
+132,
+159,
+294,
+168
+],
+"pos": [
+12,
+52
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+178,
+303,
+239
+],
+"pos": [
+52,
+291
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+241,
+303,
+321
+],
+"pos": [
+291,
+600
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+322,
+303,
+366
+],
+"pos": [
+600,
+763
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+367,
+301,
+384
+],
+"pos": [
+763,
+814
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+385,
+303,
+402
+],
+"pos": [
+814,
+883
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+403,
+303,
+437
+],
+"pos": [
+883,
+1019
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+439,
+303,
+465
+],
+"pos": [
+1019,
+1131
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+466,
+301,
+492
+],
+"pos": [
+1131,
+1237
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+493,
+301,
+519
+],
+"pos": [
+1237,
+1353
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+520,
+303,
+599
+],
+"pos": [
+1353,
+1677
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+601,
+303,
+671
+],
+"pos": [
+1677,
+1971
+]
+},
+{
+"class": "text",
+"bbox": [
+140,
+673,
+279,
+681
+],
+"pos": [
+1971,
+2011
+]
+},
+{
+"class": "text",
+"bbox": [
+132,
+682,
+303,
+707
+],
+"pos": [
+2011,
+2124
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+178,
+483,
+194
+],
+"pos": [
+2124,
+2177
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+197,
+483,
+223
+],
+"pos": [
+2177,
+2296
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+225,
+483,
+289
+],
+"pos": [
+2296,
+2556
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+291,
+483,
+327
+],
+"pos": [
+2556,
+2688
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+329,
+483,
+374
+],
+"pos": [
+2688,
+2869
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+376,
+483,
+486
+],
+"pos": [
+2869,
+3310
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+488,
+483,
+614
+],
+"pos": [
+3310,
+3826
+]
+},
+{
+"class": "text",
+"bbox": [
+312,
+617,
+483,
+707
+],
+"pos": [
+3826,
+4171
+]
+},
+{
+"class": "text",
+"bbox": [
+298,
+718,
+317,
+727
+],
+"pos": [
+4171,
+4177
+]
+},
+{
+"class": "page-footer",
+"bbox": [
+25,
+767,
+419,
+774
+],
+"pos": [
+4177,
+4287
+]
+}
+],
+"width": 612.0,
+"height": 792.0
+}
+]
+}

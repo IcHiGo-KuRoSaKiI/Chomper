@@ -120,7 +120,7 @@ For Python library usage: import chomper
     )
 
     parser.add_argument(
-        "--template",
+        "-t", "--template",
         metavar="FILE",
         help="Jinja2 template file (requires --format template)",
     )
@@ -156,10 +156,11 @@ For Python library usage: import chomper
         choices=list(CHUNK_STRATEGIES),
         default="auto",
         help=(
-            "Chunking strategy (default: auto). auto: format-aware; recursive: headings > "
-            "paragraphs > lines > sentences; fixed: word windows on line breaks; "
-            "semantic: embedding topic boundaries; layout: PDFs chunked from the "
-            "layout-model text parse() returns, never inside a table, with page numbers"
+            "Chunking strategy (default: auto). auto: format-aware (PDFs: layout); "
+            "recursive: headings > paragraphs > lines > sentences; fixed: word windows on "
+            "line breaks; semantic: embedding topic boundaries; layout: PDFs chunked from "
+            "the layout-model text parse() returns, never inside a table, with page "
+            "numbers; structural: PDFs chunked from their own parse of the file"
         ),
     )
 
@@ -170,7 +171,7 @@ For Python library usage: import chomper
         help=(
             "PDFs only: OCR for pages without a text layer (default: auto). auto OCRs "
             "only those pages; off never; force OCRs every page. Needs Tesseract or "
-            "RapidOCR. With --chunk, needs a --strategy other than auto"
+            "RapidOCR. With --chunk, not with --strategy structural"
         ),
     )
 

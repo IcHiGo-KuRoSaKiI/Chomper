@@ -430,7 +430,7 @@ def parse_bytes(
 def chunk(
     file_path: str | Path,
     *,
-    strategy: Literal["auto", "semantic", "fixed", "recursive", "layout"] = "auto",
+    strategy: Literal["auto", "semantic", "fixed", "recursive", "layout", "structural"] = "auto",
     chunk_size: int = 1000,
     overlap: int = 100,
     embedding_model: Literal["fast", "balanced"] = "fast",
@@ -448,7 +448,7 @@ def chunk(
     Args:
         file_path: Path to the document file.
         strategy: Chunking strategy:
-            - "auto": Format-aware (PDF structure, headings, code by function)
+            - "auto": Format-aware (PDFs: "layout"; headings, code by function)
             - "recursive": Structure-aware text (headings > paragraphs > lines >
               sentences; never inside a code fence or table row)
             - "fixed": Fixed word windows that only break between lines
@@ -456,7 +456,9 @@ def chunk(
             - "layout": PDFs: the layout-model Markdown that parse() returns, cut at
               headings, never inside a table or figure line, with page/pages,
               heading_path metadata and offsets into parse() text (other formats:
-              same as "auto")
+              same as "auto"). The default for PDFs.
+            - "structural": PDFs: chunked from the chunker's own parse of the
+              file (no OCR; offsets index its own text); other formats: "auto"
         chunk_size: Maximum words per chunk (default: 1000).
         overlap: Words to overlap between chunks (default: 100).
         embedding_model: For semantic strategy:
@@ -468,8 +470,8 @@ def chunk(
             "force" OCRs every page. Ignored for other formats.
         table_format: PDFs only. "markdown" (default) pipe tables, or "html"
             tables that keep merged cells. Ignored for other formats.
-            Both apply to strategies that chunk extracted text; "auto" on a PDF
-            reads the file directly, so setting either there raises ChomperError.
+            Both apply to every strategy except "structural", which reads the
+            PDF file directly, so setting either there raises ChomperError.
 
     Returns:
         List of ChunkResult objects.

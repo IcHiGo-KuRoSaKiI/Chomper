@@ -486,7 +486,7 @@ class InteractiveShell:
             print("  json on|off       Toggle JSON output mode")
             print("  max-chars N       Set maximum output characters (0 = unlimited)")
             print("  chunk-size N      Set words per chunk (default: 1000)")
-            print("  strategy <name>   Set chunking strategy (auto, recursive, fixed, semantic, layout)")
+            print("  strategy <name>   Set chunking strategy (auto, recursive, fixed, semantic, layout, structural)")
             print("  template <path>   Set Jinja2 template file path")
             print("  ocr <mode>        PDF OCR for pages without text (auto, off, force)")
             print("  table-format <f>  PDF table output (markdown, html)")

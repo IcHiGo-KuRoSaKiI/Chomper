@@ -26,16 +26,19 @@ from __future__ import annotations
 import contextlib
 import functools
 import logging
+import os
 import re
 import sys
+import threading
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from ..pdf_structure.cell_marks import recover_cell_marks, recover_mark_columns
 from ..pdf_structure.figures import CAPTION_RE, Caption, find_caption, share_captions
 from ..pdf_structure.lists import list_indent_hints, normalize_markdown_lists
+from ..pdf_structure.sentences import ends_mid_sentence
 from .image_utils import image_marker, image_record
 
 logger = logging.getLogger(__name__)
@@ -72,13 +75,126 @@ class LayoutResult:
     ocr_pages: list[int] = field(default_factory=list)
 
 
-def _ocr_mode(ocr: str) -> Any:
+class _StderrStream:
+    """Write-through to whatever ``sys.stderr`` is at the time of each write."""
+
+    def write(self, text: str) -> int:
+        return sys.stderr.write(text)
+
+    def flush(self) -> None:
+        sys.stderr.flush()
+
+
+def _route_pymupdf_messages_to_stderr() -> None:
+    """Send PyMuPDF's user messages to stderr unless the user chose a destination.
+
+    ``pymupdf.message`` prints to the ``sys.stdout`` object captured when PyMuPDF
+    was imported, so ``contextlib.redirect_stdout`` does not catch it. pymupdf4llm
+    flushes "=== Document parser messages ===", the OCR engine and every OCR'd
+    page through it after each parse. Under the MCP stdio transport stdout is the
+    JSON-RPC channel, so those lines corrupted the protocol. A ``PYMUPDF_MESSAGE``
+    setting, or a stream set with ``pymupdf.set_messages``, is left alone.
+    """
+    if os.environ.get("PYMUPDF_MESSAGE"):
+        return
+    try:
+        import pymupdf
+    except ImportError:  # pragma: no cover - PyMuPDF is a core dependency
+        return
+    current = getattr(pymupdf, "_g_out_message", None)
+    if current is None or current is sys.stdout or current is sys.__stdout__:
+        pymupdf.set_messages(stream=_StderrStream())
+
+
+_route_pymupdf_messages_to_stderr()
+
+_STDOUT_LOCK = threading.Lock()
+_stdout_depth = 0
+_saved_stdout: Any = None
+
+
+@contextlib.contextmanager
+def stdout_to_stderr() -> Iterator[None]:
+    """Send Python-level ``print`` output to stderr while third-party code runs.
+
+    ``contextlib.redirect_stdout`` is not safe across threads: two overlapping
+    calls (the MCP server extracts in worker threads) restore in the wrong order
+    and can leave ``sys.stdout`` pointing at stderr for good. This one counts
+    nested and concurrent users and restores the real stdout when the last
+    one leaves.
+    """
+    global _stdout_depth, _saved_stdout
+    with _STDOUT_LOCK:
+        if _stdout_depth == 0:
+            _saved_stdout = sys.stdout
+            sys.stdout = _StderrStream()  # type: ignore[assignment]
+        _stdout_depth += 1
+    try:
+        yield
+    finally:
+        with _STDOUT_LOCK:
+            _stdout_depth -= 1
+            if _stdout_depth == 0:
+                sys.stdout = _saved_stdout
+                _saved_stdout = None
+
+
+def _clear_parser_messages() -> None:
+    """Empty pymupdf4llm's message buffer.
+
+    It is flushed through ``pymupdf.message`` at the end of every
+    ``parse_document`` and then "emptied" with ``truncate()`` at the end
+    position, which empties nothing: every later parse replayed the old lines.
+    """
+    buffer = getattr(_layout, "INFO_MESSAGES", None)
+    if buffer is not None:
+        buffer.seek(0)
+        buffer.truncate()
+
+
+@functools.cache
+def _ocr_engine() -> Callable[..., Any] | None:
+    """The installed OCR engine (Tesseract, RapidOCR...), looked up once."""
     assert _layout is not None
-    if ocr == "off":
-        return _layout.OCRMode.NEVER
-    if _layout.select_ocr_function() is None:
-        return _layout.OCRMode.NEVER
-    return _layout.OCRMode.FORCE_KEEP_OLD if ocr == "force" else _layout.OCRMode.SELECT_KEEP_OLD
+    with stdout_to_stderr():
+        engine = _layout.select_ocr_function()
+    return engine if callable(engine) else None
+
+
+def _only_pages(engine: Callable[..., Any], wanted: frozenset[int]) -> Callable[..., Any]:
+    """``engine`` restricted to the 0-based page numbers in ``wanted``."""
+
+    def run(page: Any, *args: Any, **kwargs: Any) -> Any:
+        if page.number in wanted:
+            return engine(page, *args, **kwargs)
+        return None
+
+    return run
+
+
+def _ocr_plan(ocr: str, without_text: Sequence[int]) -> tuple[Any, Callable[..., Any] | None]:
+    """``(use_ocr, ocr_function)`` for ``parse_document``.
+
+    * ``off``: never.
+    * ``force``: every page, through pymupdf4llm's ``FORCE_KEEP_OLD`` (text that
+      is already extractable is masked out of the image before OCR).
+    * ``auto``: only the pages in ``without_text`` (no text layer before parsing).
+      pymupdf4llm's own ``SELECT_KEEP_OLD`` heuristics OCR'd most pages of
+      born-digital documents with icons and boxed notes, doubling the time and
+      adding garbled words to the text. Here every page is offered to OCR
+      (``FORCE_KEEP_OLD``) but the engine runs only on pages without a text
+      layer; a document where every page has one skips OCR entirely.
+    """
+    assert _layout is not None
+    never = (_layout.OCRMode.NEVER, None)
+    if ocr == "off" or (ocr == "auto" and not without_text):
+        return never
+    engine = _ocr_engine()
+    if engine is None:
+        return never
+    if ocr == "force":
+        return _layout.OCRMode.FORCE_KEEP_OLD, engine
+    return _layout.OCRMode.FORCE_KEEP_OLD, _only_pages(engine, frozenset(without_text))
 
 
 def _plain(markdown: str) -> str:
@@ -87,8 +203,188 @@ def _plain(markdown: str) -> str:
     return " ".join(text.split())
 
 
+#: A lowercase roman numeral at the start or end of a line: a front-matter folio
+#: ("vi Monetary Policy Report", "iii").
+_EDGE_ROMAN = re.compile(r"^[ivxl]{1,7}(?=\s|$)|(?<=\s)[ivxl]{1,7}$")
+_ROMAN_VALUES = {"i": 1, "v": 5, "x": 10, "l": 50}
+
+
+def _roman(token: str) -> int | None:
+    """Value of a lowercase roman numeral, or None when ``token`` is not one."""
+    if not token or any(c not in _ROMAN_VALUES for c in token):
+        return None
+    total = 0
+    for i, c in enumerate(token):
+        value = _ROMAN_VALUES[c]
+        total += -value if i + 1 < len(token) and _ROMAN_VALUES[token[i + 1]] > value else value
+    return total
+
+
 def _running_key(text: str) -> str:
-    return re.sub(r"\d+", "#", _plain(text)).casefold()
+    return _EDGE_ROMAN.sub("#", re.sub(r"\d+", "#", _plain(text))).casefold()
+
+
+# ----------------------------------------------------------------- running lines
+#: A running head or foot is a short line: at most this many words.
+_RUNNING_MAX_WORDS = 12
+#: Hits of one running line sit at the same height: within this share of the page.
+_RUNNING_Y_TOLERANCE = 0.01
+#: A recurring line counts as running on at least this many pages...
+_RUNNING_MIN_PAGES = 3
+#: ...or on at least this share of the pages (and never on fewer than two).
+_RUNNING_MIN_SHARE = 0.3
+#: A bare folio: ``639``, ``K-12``, ``P.2``, ``Page 4``, ``4 of 20``.
+_FOLIO = re.compile(
+    r"^(?:page\s*)?([a-z]{1,3}\s?[-.–]?\s?)?(\d{1,4})(?:\s*(?:of|/)\s*\d{1,4})?$",
+    re.IGNORECASE,
+)
+_LAST_NUMBER = re.compile(r"(\d+)\D*$")
+
+
+def _folio_number(text: str) -> tuple[str, int] | None:
+    """``(series, number)`` of a bare folio (``("k", 12)`` for ``K-12``), else None.
+
+    Lowercase roman numerals (front matter: ``iii``) are their own series.
+    """
+    folio = _FOLIO.match(text)
+    if folio:
+        prefix = re.sub(r"[\s.\-–]", "", folio.group(1) or "").casefold()
+        return prefix, int(folio.group(2))
+    value = _roman(text)
+    return ("roman", value) if value is not None else None
+
+
+@dataclass(frozen=True)
+class _EdgeLine:
+    """A short text box in one of the two outermost rows at the top or bottom of a page."""
+
+    page: int  # 0-based
+    start: int
+    end: int
+    y: float  # top edge as a share of the page height
+    depth: int  # 0: outermost row, 1: next row in
+    text: str  # plain text
+
+
+def _edge_lines(chunk: dict[str, Any], height: float) -> list[_EdgeLine]:
+    """Short boxes in the top two and bottom two rows of a page.
+
+    Rows are boxes that overlap vertically, ordered by height on the page (reading
+    order can put a running head anywhere in the page text). Pictures, tables and
+    empty boxes are not lines.
+    """
+    text: str = chunk["text"]
+    items: list[tuple[float, float, int, int, str]] = []
+    for box in chunk.get("page_boxes", []):
+        if box["class"] in ("picture", "table"):
+            continue
+        start, end = box["pos"]
+        plain = _plain(text[start:end])
+        if plain:
+            items.append((float(box["bbox"][1]), float(box["bbox"][3]), start, end, plain))
+    items.sort()
+    rows: list[list[tuple[float, float, int, int, str]]] = []
+    bottom = -1.0
+    for item in items:
+        if rows and item[0] < bottom - 1:
+            rows[-1].append(item)
+            bottom = max(bottom, item[1])
+        else:
+            rows.append([item])
+            bottom = item[1]
+    depth_of: dict[int, int] = {}
+    for depth in (1, 0):  # outermost wins when a page has fewer than four rows
+        for row_index in (depth, len(rows) - 1 - depth):
+            if 0 <= row_index < len(rows):
+                depth_of[row_index] = depth
+    height = height or 1.0
+    return [
+        _EdgeLine(page=-1, start=s, end=e, y=y0 / height, depth=depth, text=plain)
+        for row_index, depth in depth_of.items()
+        for y0, _, s, e, plain in rows[row_index]
+        if len(plain.split()) <= _RUNNING_MAX_WORDS
+    ]
+
+
+def _often(pages: set[int], page_count: int) -> bool:
+    count = len(pages)
+    return count >= 2 and (count >= _RUNNING_MIN_PAGES or count >= _RUNNING_MIN_SHARE * page_count)
+
+
+def _same_height(hits: list[_EdgeLine]) -> list[_EdgeLine]:
+    """The hits at the line's usual height (a chapter-opening title sits lower)."""
+    ys = sorted(hit.y for hit in hits)
+    usual = ys[len(ys) // 2]
+    return [hit for hit in hits if abs(hit.y - usual) <= _RUNNING_Y_TOLERANCE]
+
+
+def running_lines(chunks: list[dict[str, Any]], heights: list[float]) -> dict[int, set[tuple[int, int]]]:
+    """Running heads, running feet and folios the layout model did not label as such.
+
+    The model labels a running head ``page-header`` on some pages and
+    ``section-header`` or ``text`` on others, and alternating odd/even heads are
+    two different lines, so repetition among ``page-header`` boxes alone missed
+    45 CFR's "Dept. of Health and Human Services" / "45 CFR Subtitle A (10-1-23
+    Edition)", its section locators ("§ 164.512") and folios ("639"), and
+    Berkshire's "Notes to Consolidated Financial Statements".
+
+    * A recurring line: a short box in the outermost row at the top or bottom of
+      the page whose text, digits ignored, recurs at the same height on at least
+      three pages or 30% of pages (never fewer than two, so a one-off top line is
+      kept). Only the outermost row: in long training manuals the second row holds
+      real headings that start many pages ("Exercise 3", "Chapter summary",
+      "Illustration 2"). When the digits differ on every page
+      the line must also track the page number (a folio inside the head) or
+      repeat exactly somewhere, so "Question 1", "Question 2"... heading one page
+      each are kept.
+    * A bare folio (``639``, ``K-12``, ``Page 4``) in the two outermost rows whose
+      number minus the page index is shared by enough pages, by the same rule.
+
+    Returns:
+        ``{page index: {(start, end) of each box to drop}}``, positions into the
+        page chunk's text.
+    """
+    page_count = len(chunks)
+    found: dict[int, set[tuple[int, int]]] = {}
+    if page_count < 2:
+        return found
+    by_key: dict[str, list[_EdgeLine]] = {}
+    folios: dict[tuple[str, int], list[_EdgeLine]] = {}
+    for index, chunk in enumerate(chunks):
+        height = heights[index] if index < len(heights) else 0.0
+        for line in _edge_lines(chunk, height):
+            line = _EdgeLine(index, line.start, line.end, line.y, line.depth, line.text)
+            number = _folio_number(line.text)
+            if number is not None:
+                folios.setdefault((number[0], number[1] - index), []).append(line)
+            if line.depth == 0:
+                by_key.setdefault(_running_key(line.text), []).append(line)
+
+    drop: list[_EdgeLine] = []
+    for key, hits in by_key.items():
+        if all(_folio_number(hit.text) is not None for hit in hits):
+            continue  # bare numbers: only as folios that track the page (below)
+        hits = _same_height(hits)
+        if not _often({hit.page for hit in hits}, page_count):
+            continue
+        if "#" in key:
+            texts = [hit.text for hit in hits]
+            offsets = [
+                int(match.group(1)) - hit.page
+                for hit in hits
+                if (match := _LAST_NUMBER.search(hit.text))
+            ]
+            repeats = len(set(texts)) < len(texts)
+            tracks_page = len(set(offsets)) < len(offsets)
+            if not (repeats or tracks_page):
+                continue
+        drop.extend(hits)
+    for hits in folios.values():
+        if _often({hit.page for hit in hits}, page_count):
+            drop.extend(hits)
+    for hit in drop:
+        found.setdefault(hit.page, set()).add((hit.start, hit.end))
+    return found
 
 
 def _box(box: dict[str, Any]) -> tuple[float, float, float, float]:
@@ -201,18 +497,24 @@ def extract_with_layout(
     # Before parsing: OCR writes recognised text into the page objects, after
     # which a scanned page looks like it always had a text layer.
     text_layer = [bool(page.get_text("text").strip()) for page in pdf_document]
-    # pymupdf4llm prints progress and "Using Tesseract for OCR processing." to
-    # stdout. Under the MCP stdio transport stdout is the JSON-RPC channel, so
-    # every library message goes to stderr instead.
-    with contextlib.redirect_stdout(sys.stderr):
+    use_ocr, ocr_function = _ocr_plan(
+        ocr, [index for index, has_text in enumerate(text_layer) if not has_text]
+    )
+    # pymupdf4llm prints warnings with print() and flushes its parser messages
+    # through pymupdf.message (routed to stderr at import, above). Under the MCP
+    # stdio transport stdout is the JSON-RPC channel, so nothing may reach it.
+    with stdout_to_stderr():
+        _clear_parser_messages()
         parsed = _layout.parse_document(
             pdf_document,
-            use_ocr=_ocr_mode(ocr),
+            use_ocr=use_ocr,
+            ocr_function=ocr_function,
             force_text=True,
             render_html_tables=table_format == "html",
             show_progress=False,
         )
         chunks = parsed.to_markdown(page_chunks=True, header=True, footer=True)
+        _clear_parser_messages()
     page_count = len(chunks)
 
     # Running heads: header/footer text that repeats on other pages (numbers ignored).
@@ -224,6 +526,7 @@ def extract_with_layout(
             if b["class"] in ("page-header", "page-footer")
         }
         seen.update(k for k in keys if k)
+    running = running_lines(chunks, [float(page.rect.height) for page in pdf_document])
 
     # Logos repeated on most pages get no marker (still returned as images).
     pages_per_key: dict[str, set[int]] = {}
@@ -249,6 +552,7 @@ def extract_with_layout(
         had_text_layer = text_layer[index]
         replacements: list[tuple[int, int, str]] = []
 
+        dropped = set(running.get(index, ()))
         for box in boxes:
             if box["class"] not in ("page-header", "page-footer"):
                 continue
@@ -258,7 +562,8 @@ def extract_with_layout(
                 continue
             key = _running_key(body)
             if _PAGE_NUMBER.match(_plain(body)) or (page_count > 1 and seen[key] >= 2):
-                replacements.append((start, end, ""))
+                dropped.add((start, end))
+        replacements.extend((start, end, "") for start, end in sorted(dropped))
 
         for box in boxes:
             rendered = table_markdown.get((index, box.get("index")))
@@ -377,6 +682,7 @@ def extract_with_layout(
                 text = _OCR_JUNK_HEADING.sub("", text)
 
         text = normalize_markdown_lists(_tidy(text), list_indent_hints(lines))
+        text = join_broken_paragraphs(text)
         result.pages.append(LayoutPage(text=text.strip("\n") + "\n", figures=figures))
     return result
 
@@ -489,3 +795,126 @@ def _tidy(markdown: str) -> str:
         lines.append(line if in_fence else line.rstrip())
     text = _BOLD_HEADING.sub(r"\1 \2", "\n".join(lines))
     return re.sub(r"\n{3,}", "\n\n", text)
+
+
+# ------------------------------------------------------- paragraphs across breaks
+#: Words that cannot end an English sentence: a block ending in one runs on.
+_RUN_ON_WORDS = frozenset(
+    "a an the of to in for with on at by from into onto upon under over between among "
+    "about after before during without within per via and or but nor as than that which "
+    "who whom whose where when while if because although though whether is are was were "
+    "be been being has have had will would shall should may might must can could not no "
+    "this these those its their our your his her my such any each every both either "
+    "neither other another see".split()
+)
+#: Cross-reference words: "paragraph" / "(d) of this section" is one sentence.
+_REFERENCE_WORDS = frozenset({"paragraph", "paragraphs"})
+#: First line of a block that is structure, not running prose.
+_NOT_PROSE = re.compile(
+    r"^\s*(?:#|\||<|!\[|[-*+•]\s|\d{1,3}[.)]\s|>|```|~~~|\$\$|\*Text in figure)"
+)
+#: An enumeration label that starts a new item: "(3)", "(ii)", "(A)", "a)", "iv.".
+_ITEM_START = re.compile(r"^\s*(?:\((?:\d{1,3}|[ivxlc]{1,6}|[A-Za-z])\)|(?:\d{1,3}|[a-z]|[ivxlc]{1,6})[.)]\s)")
+#: "...; and" / "...; or": the block closes one item of an enumeration.
+_ITEM_END = re.compile(r";\s*(?:and|or)$")
+_SENTENCE_END = re.compile(r"[.!?][\"'”’)]*(?:\s|$)")
+#: A continuation label, not text: "(continued)", "Continued…".
+_CONTINUED = re.compile(r"^\W*continued\W*$", re.IGNORECASE)
+
+
+def _joiner(before: str, after: str) -> str | None:
+    """How to join two blank-line separated blocks, or None to keep them apart.
+
+    ``" "`` when ``before`` is prose that stops mid-sentence and ``after`` is the
+    rest of that sentence: ``after`` starts lowercase, or ``before`` ends in a
+    comma or a word no sentence ends with ("the", "with", "and") and ``after``
+    starts a word. ``""`` for a word hyphenated across the break
+    (``enti-`` / ``ty``). Never across headings, tables, lists, figures,
+    captions or enumerated items (``...; and`` / ``(3) That ...``).
+    """
+    before, after = before.rstrip(), after.lstrip()
+    first_before = before.split("\n", 1)[0]
+    last_before = before.rsplit("\n", 1)[-1]
+    first_after = after.split("\n", 1)[0]
+    if not before or not after:
+        return None
+    if any(_NOT_PROSE.match(line) for line in (first_before, last_before, first_after)):
+        return None
+    if CAPTION_RE.match(_plain(first_before)) or CAPTION_RE.match(_plain(first_after)):
+        return None
+    tail, head = _plain(last_before), _plain(first_after)
+    if not tail or not head or _ITEM_END.search(tail) or _CONTINUED.match(head):
+        return None
+    last_word = tail.split()[-1].casefold()
+    if _ITEM_START.match(first_after):
+        # A new enumerated item, unless it is a cross-reference: "paragraph" / "(d)".
+        return " " if last_word in _REFERENCE_WORDS else None
+    if head[0].islower():
+        if re.search(r"[A-Za-z]-$", before):
+            return ""
+        return " " if ends_mid_sentence(tail) else None
+    if not (head[0].isalnum() or head[0] in "(“\"'‘$"):
+        return None
+    run_on = (
+        tail.endswith(",")
+        or last_word in _RUN_ON_WORDS
+        or last_word.endswith(("’s", "'s"))
+    )
+    if not (run_on and ends_mid_sentence(tail)):
+        return None
+    # Without the lowercase signal, ``after`` must read as the rest of a sentence:
+    # running prose with a sentence end, not a label ("Or, you can write to:"),
+    # a cover line or a "(continued)" marker.
+    rest = _plain(after.split("\n\n", 1)[0])
+    if len(rest.split()) < 6 or rest.endswith(":") or not _SENTENCE_END.search(rest):
+        return None
+    return " "
+
+
+def join_broken_paragraphs(markdown: str) -> str:
+    """Rejoin paragraphs a column break split in two (see :func:`_joiner`).
+
+    The layout model gives each column's part of a paragraph its own region, and
+    regions are written as separate blocks, so a sentence running from the foot
+    of one column to the top of the next came out as two paragraphs.
+    """
+    blocks = markdown.split("\n\n")
+    out: list[str] = []
+    fenced = False
+    for block in blocks:
+        joined = False
+        if out and not fenced and block.strip():
+            how = _joiner(out[-1], block)
+            if how is not None:
+                head = out[-1].rstrip()
+                if how == "":
+                    head = head[:-1]  # the hyphen of the split word
+                out[-1] = head + how + block.lstrip()
+                joined = True
+        if not joined:
+            out.append(block)
+        if block.count("```") % 2:
+            fenced = not fenced
+    return "\n\n".join(out)
+
+
+def join_pages(texts: Sequence[str]) -> str:
+    """The document text: page texts joined with a blank line, or a space where a
+    sentence runs on from one page to the next (see :func:`_joiner`).
+
+    Each page's text stays a verbatim substring, so per-page offsets still work;
+    a word hyphenated across the page break keeps its hyphen for that reason.
+    """
+    out = ""
+    for raw in texts:
+        text = raw.strip("\n")
+        if not text.strip():
+            continue
+        if not out:
+            out = text
+            continue
+        last_block = out.rsplit("\n\n", 1)[-1]
+        first_block = text.split("\n\n", 1)[0]
+        how = _joiner(last_block, first_block)
+        out += "\n\n" + text if how is None else how + text
+    return out

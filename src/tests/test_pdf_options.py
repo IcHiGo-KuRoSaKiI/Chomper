@@ -138,9 +138,15 @@ def test_library_rejects_unknown_option_values(fake_pdf: Path, kwargs: dict[str,
     assert FakePDFExtractor.calls == []
 
 
-def test_auto_pdf_chunking_refuses_options_it_cannot_honour(fake_pdf: Path) -> None:
-    with pytest.raises(chomper.ChomperError, match="strategy 'layout'"):
-        chomper.chunk(fake_pdf, ocr="force")
+def test_auto_pdf_chunking_honours_options(fake_pdf: Path) -> None:
+    # "auto" chunks PDFs from the extracted text (layout), so the options apply.
+    chomper.chunk(fake_pdf, ocr="force", table_format="html")
+    assert FakePDFExtractor.calls[-1] == {"ocr": "force", "table_format": "html"}
+
+
+def test_structural_pdf_chunking_refuses_options_it_cannot_honour(fake_pdf: Path) -> None:
+    with pytest.raises(chomper.ChomperError, match="strategy 'auto' or 'layout'"):
+        chomper.chunk(fake_pdf, strategy="structural", ocr="force")
 
 
 # ------------------------------------------------------------------------- MCP
@@ -221,9 +227,13 @@ def test_mcp_options_reach_the_extractor(fake_pdf: Path) -> None:
     })
     assert FakePDFExtractor.calls[-1] == {"ocr": "force"}
 
-    result = call("parse_document_chunked", {"file_path": str(fake_pdf), "ocr": "force"})
+    call("parse_document_chunked", {"file_path": str(fake_pdf), "ocr": "force"})
+    assert FakePDFExtractor.calls[-1] == {"ocr": "force"}  # auto = layout: extracted text
+    result = call("parse_document_chunked", {
+        "file_path": str(fake_pdf), "chunking_strategy": "structural", "ocr": "force",
+    })
     assert isinstance(result, CallToolResult) and result.isError
-    assert "layout" in result.content[0].text
+    assert "'auto' or 'layout'" in result.content[0].text
 
     batch = json.loads(call("batch_parse", {
         "file_paths": [str(fake_pdf)], "options": {"table_format": "html"},

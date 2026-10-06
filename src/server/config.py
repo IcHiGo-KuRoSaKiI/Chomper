@@ -27,8 +27,12 @@ DEFAULT_CHUNK_SIZE = 1000
 DEFAULT_CHUNK_OVERLAP = 100
 DEFAULT_CHUNK_STRATEGY = "auto"
 #: Strategy names accepted by the library, the CLI and the MCP server alike.
-#: ``layout`` chunks a PDF's layout-model Markdown (other formats: same as ``auto``).
-CHUNK_STRATEGIES: tuple[str, ...] = ("auto", "semantic", "fixed", "recursive", "layout")
+#: ``layout`` chunks a PDF's layout-model Markdown (the text ``parse()`` returns) and
+#: is what ``auto`` uses for PDFs; ``structural`` chunks a PDF from its own parse of
+#: the file. Both mean ``auto`` for other formats.
+CHUNK_STRATEGIES: tuple[str, ...] = (
+    "auto", "semantic", "fixed", "recursive", "layout", "structural",
+)
 
 # PDF extraction options (PDFExtractor ``ocr`` / ``table_format``; layout backend).
 #: ``auto``: OCR pages without a text layer when Tesseract or RapidOCR is installed;
@@ -50,9 +54,12 @@ DEFAULT_OUTPUT_FORMAT = OUTPUT_FORMAT_JSON
 FORMAT_DESCRIPTIONS: dict[str, str] = {
     ".pdf": "PDF documents with text and image extraction",
     ".docx": "Microsoft Word documents (OOXML format)",
-    ".doc": "Microsoft Word documents (legacy format via DOCX handler)",
+    ".doc": (
+        "Word documents in Office Open XML (.docx) format saved under a .doc name. "
+        "Binary Word 97-2003 .doc files can't be read: save them as .docx first"
+    ),
     ".pptx": "Microsoft PowerPoint presentations",
-    ".ppt": "Microsoft PowerPoint presentations (legacy format)",
+    ".ppt": "Binary PowerPoint 97-2003 presentations: not readable, save as .pptx first",
     ".xlsx": "Microsoft Excel spreadsheets",
     ".xlsm": "Microsoft Excel macro-enabled spreadsheets",
     ".xltx": "Microsoft Excel templates",
@@ -86,6 +93,16 @@ FORMAT_DESCRIPTIONS: dict[str, str] = {
     ".rtf": "Rich Text Format documents",
 }
 
+#: Extensions Chomper recognises but cannot read, with what to do instead. They are
+#: listed by ``list_supported_formats`` as unavailable, and opening one fails with
+#: this message rather than a generic "unsupported format".
+UNREADABLE_FORMATS: dict[str, str] = {
+    ".ppt": (
+        "Binary PowerPoint 97-2003 (.ppt) files can't be read; "
+        "save the deck as .pptx first."
+    ),
+}
+
 # (module, class name, module-level flags that must all be true, pip hint)
 _Spec = tuple[str, str, tuple[str, ...], str]
 
@@ -101,7 +118,6 @@ _EXTRACTOR_SPECS: dict[str, _Spec] = {
     ".docx": (_EX + "docx_extractor", "DOCXExtractor", (), "python-docx"),
     ".doc": (_EX + "docx_extractor", "DOCXExtractor", (), "python-docx"),
     ".pptx": (_EX + "pptx_extractor", "PPTXExtractor", (), "python-pptx"),
-    ".ppt": (_EX + "pptx_extractor", "PPTXExtractor", (), "python-pptx"),
     **dict.fromkeys((".xlsx", ".xlsm", ".xltx", ".xltm"), (_EX + "excel_extractor", "ExcelExtractor", ("OPENPYXL_AVAILABLE",), "openpyxl")),
     ".csv": (_EX + "csv_extractor", "CSVExtractor", ("PANDAS_AVAILABLE",), "'chomper[csv]'"),
     ".tsv": (_EX + "csv_extractor", "CSVExtractor", ("PANDAS_AVAILABLE",), "'chomper[csv]'"),
@@ -126,13 +142,14 @@ _CHUNKER_SPECS: dict[str, _Spec] = {
     **dict.fromkeys((".txt", ".text", ".log", ".json", ".yaml", ".yml", ".xml", ".eml", ".msg", ".epub", ".rtf"), (_CH + "text_chunker", "TextChunker", (), "")),
     ".md": (_CH + "markdown_chunker", "MarkdownChunker", (), ""),
     ".markdown": (_CH + "markdown_chunker", "MarkdownChunker", (), ""),
-    # Structural chunking is the default for PDFs: heading-bounded, table-safe and
-    # sentence-safe. PDFChunker remains importable for page or word-count slicing.
-    ".pdf": (_CH + "structural_pdf_chunker", "StructuralPDFChunker", (), ""),
+    # Layout chunking is the default for PDFs: it splits the text parse() returns
+    # (so OCR, table_format, running-head removal and offsets all agree with
+    # parse()), heading-bounded, table- and figure-safe, with page numbers. The
+    # structural chunker stays selectable as strategy "structural".
+    ".pdf": (_CH + "layout_pdf_chunker", "LayoutPDFChunker", (), ""),
     ".docx": (_CH + "docx_chunker", "DOCXChunker", (), ""),
     ".doc": (_CH + "docx_chunker", "DOCXChunker", (), ""),
     ".pptx": (_CH + "pptx_chunker", "PPTXChunker", (), ""),
-    ".ppt": (_CH + "pptx_chunker", "PPTXChunker", (), ""),
     **dict.fromkeys((".xlsx", ".xlsm", ".xltx", ".xltm", ".csv", ".tsv"), (_CH + "excel_chunker", "ExcelChunker", (), "")),
     ".html": (_CH + "html_chunker", "HTMLChunker", (), ""),
     ".htm": (_CH + "html_chunker", "HTMLChunker", (), ""),
@@ -209,6 +226,8 @@ class LazyRegistry(Mapping[str, type]):
 
     def unavailable_reason(self, ext: str) -> str | None:
         """Why ``ext`` is not available, or None when it is."""
+        if ext in UNREADABLE_FORMATS:
+            return UNREADABLE_FORMATS[ext]
         if ext not in self._specs:
             return f"Unsupported file format: {ext}"
         if ext in self:
