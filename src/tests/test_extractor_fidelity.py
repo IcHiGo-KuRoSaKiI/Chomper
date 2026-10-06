@@ -319,3 +319,136 @@ def test_legacy_doc_gives_a_clear_error(tmp_path: Path):
     path.write_bytes(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 512)
     with pytest.raises(ValueError, match=r"legacy binary Word 97-2003 \(\.doc\).*save it as \.docx"):
         DOCXExtractor().extract(str(path))
+
+
+# ------------------------------------------------------------------------- PPTX
+
+pptx = pytest.importorskip("pptx", reason="python-pptx required")
+from pptx.chart.data import CategoryChartData  # noqa: E402
+from pptx.enum.chart import XL_CHART_TYPE  # noqa: E402
+from pptx.oxml import parse_xml as pptx_parse_xml  # noqa: E402
+from pptx.util import Inches  # noqa: E402
+
+from src.extractors.pptx_extractor import PPTXExtractor  # noqa: E402
+
+A_DECL = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+
+
+def _set_bullet(paragraph, xml: str) -> None:
+    """Give a paragraph an explicit bullet element (``<a:buNone/>`` etc.)."""
+    element = xml.replace("/>", f" {A_DECL}/>", 1)
+    paragraph._p.get_or_add_pPr().insert(0, pptx_parse_xml(element))
+
+
+def _add_paragraphs(frame, items: list[tuple[str, int]]) -> list:
+    paragraphs = []
+    for index, (text, level) in enumerate(items):
+        paragraph = frame.paragraphs[0] if index == 0 else frame.add_paragraph()
+        paragraph.text = text
+        paragraph.level = level
+        paragraphs.append(paragraph)
+    return paragraphs
+
+
+@pytest.fixture
+def deck(tmp_path: Path) -> Path:
+    prs = pptx.Presentation()
+
+    # 1: body placeholder -- bulleted by default via the master's bodyStyle.
+    s1 = prs.slides.add_slide(prs.slide_layouts[1])
+    s1.shapes.title.text = "Agenda"
+    body = s1.placeholders[1].text_frame
+    paragraphs = _add_paragraphs(
+        body, [("Intro", 0), ("Background", 1), ("Scope", 1), ("Plan", 0), ("No bullet here", 0)]
+    )
+    _set_bullet(paragraphs[-1], "<a:buNone/>")
+
+    # 2: text boxes added out of reading order; numbering and bullets on text boxes.
+    s2 = prs.slides.add_slide(prs.slide_layouts[6])
+    s2.shapes.add_textbox(Inches(5), Inches(1), Inches(3), Inches(1)).text_frame.text = "Right column"
+    left = s2.shapes.add_textbox(Inches(1), Inches(1.1), Inches(3), Inches(1)).text_frame
+    left.text = "Left column with "
+    run = left.paragraphs[0].add_run()
+    run.text = "a link"
+    run.hyperlink.address = "https://example.com/x"
+    bottom = s2.shapes.add_textbox(Inches(1), Inches(4), Inches(6), Inches(2)).text_frame
+    steps = _add_paragraphs(bottom, [("Step one", 0), ("Step two", 0), ("Detail", 1), ("Starred", 0), ("Plain line", 0)])
+    _set_bullet(steps[0], '<a:buAutoNum type="arabicPeriod" startAt="3"/>')
+    _set_bullet(steps[1], '<a:buAutoNum type="arabicPeriod" startAt="3"/>')
+    _set_bullet(steps[2], '<a:buAutoNum type="alphaLcParenR"/>')
+    _set_bullet(steps[3], '<a:buChar char="*"/>')
+
+    # 3: a table with a merge, a chart, and speaker notes.
+    s3 = prs.slides.add_slide(prs.slide_layouts[5])
+    s3.shapes.title.text = "Numbers"
+    table = s3.shapes.add_table(2, 2, Inches(1), Inches(1.5), Inches(4), Inches(1)).table
+    table.cell(0, 0).merge(table.cell(0, 1))
+    table.cell(0, 0).text = "Region"
+    table.cell(1, 0).text = "North"
+    table.cell(1, 1).text = "a|b"
+    data = CategoryChartData()
+    data.categories = ["Q1", "Q2"]
+    data.add_series("2024", (1.0, 2.5))
+    data.add_series("2025", (3, 4))
+    chart = s3.shapes.add_chart(
+        XL_CHART_TYPE.COLUMN_CLUSTERED, Inches(1), Inches(3.5), Inches(6), Inches(3), data
+    ).chart
+    chart.has_title = True
+    chart.chart_title.text_frame.text = "Revenue"
+    s3.notes_slide.notes_text_frame.text = "Remember the budget"
+
+    # 4: a group (picture + caption) and a small logo with alt text above it.
+    s4 = prs.slides.add_slide(prs.slide_layouts[6])
+    group = s4.shapes.add_group_shape()
+    photo = group.shapes.add_picture(io.BytesIO(_png(400, 300, "blue")), Inches(1), Inches(1))
+    photo._element.nvPicPr.cNvPr.set("descr", "Team photo")
+    group.shapes.add_textbox(Inches(1), Inches(5), Inches(3), Inches(1)).text_frame.text = "grouped caption"
+    logo = s4.shapes.add_picture(io.BytesIO(_png(30, 30, "orange")), Inches(8), Inches(0.2))
+    logo._element.nvPicPr.cNvPr.set("descr", "Logo")
+
+    path = tmp_path / "fidelity.pptx"
+    prs.save(path)
+    return path
+
+
+def test_pptx_bullets_numbering_order_tables_charts_notes(deck: Path):
+    assert PPTXExtractor().extract(str(deck)).text == (
+        "## Slide 1: Agenda\n\n"
+        "- Intro\n"
+        "  - Background\n"
+        "  - Scope\n"
+        "- Plan\n\n"
+        "No bullet here\n\n"
+        "## Slide 2\n\n"
+        "Left column with [a link](https://example.com/x)\n\n"
+        "Right column\n\n"
+        "3. Step one\n"
+        "4. Step two\n"
+        "  a) Detail\n"
+        "- Starred\n\n"
+        "Plain line\n\n"
+        "## Slide 3: Numbers\n\n"
+        "| Region |  |\n"
+        "| --- | --- |\n"
+        "| North | a\\|b |\n\n"
+        "**Chart: Revenue** (column clustered)\n\n"
+        "| Category | 2024 | 2025 |\n"
+        "| --- | --- | --- |\n"
+        "| Q1 | 1 | 3 |\n"
+        "| Q2 | 2.5 | 4 |\n\n"
+        "### Notes\n\n"
+        "Remember the budget\n\n"
+        "## Slide 4\n\n"
+        "![Logo](image:s4-1)\n\n"
+        "![Team photo](image:s4-2)\n\n"
+        "grouped caption"
+    )
+
+
+def test_pptx_image_ids_alt_and_group_positions(deck: Path):
+    raw = PPTXExtractor().extract(str(deck))
+    images = collect_images(raw.structure)
+    assert [(img["id"], img["alt"], img["page"]) for img in images] == [("s4-2", "Team photo", 4)]
+    # Group children are mapped through the group transform to slide points.
+    assert images[0]["position"]["x0"] == pytest.approx(72)
+    assert images[0]["position"]["y0"] == pytest.approx(72)
