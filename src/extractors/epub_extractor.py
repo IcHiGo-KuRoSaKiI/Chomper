@@ -36,11 +36,10 @@ except ImportError:
 try:
     from bs4 import BeautifulSoup
 
-    from .html_markdown import HTMLToMarkdown, strip_boilerplate
+    from .html_markdown import HTMLToMarkdown, body_of, strip_boilerplate
 
     BS4_AVAILABLE = True
 except ImportError:
-    BeautifulSoup = None
     BS4_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
@@ -209,7 +208,7 @@ class EPUBExtractor(BaseExtractor):
             current_dir[0] = posixpath.dirname(item.get_name())
             soup = BeautifulSoup(content, "lxml")
             strip_boilerplate(soup, chrome=False)
-            text = converter.convert(soup.find("body") or soup)
+            text = converter.convert(body_of(soup))
             if not text.strip():
                 continue
             heading_line = next((line for line in text.splitlines() if line.startswith("#")), None)

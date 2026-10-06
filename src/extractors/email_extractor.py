@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 from email import policy
-from email.message import EmailMessage
+from email.message import EmailMessage, MIMEPart
 from email.parser import BytesParser
 from pathlib import Path
 from typing import Any
@@ -40,7 +40,7 @@ from .encoding_utils import decode_bytes
 try:
     from bs4 import BeautifulSoup
 
-    from .html_markdown import HTMLToMarkdown, strip_boilerplate
+    from .html_markdown import HTMLToMarkdown, body_of, strip_boilerplate
 
     BS4_AVAILABLE = True
 except ImportError:
@@ -82,7 +82,7 @@ def html_body_to_markdown(
     soup = BeautifulSoup(html, "lxml")
     strip_boilerplate(soup, chrome=False)
     converter = HTMLToMarkdown(image_loader=load)
-    return converter.convert(soup.find("body") or soup), converter.images
+    return converter.convert(body_of(soup)), converter.images
 
 
 def render_email(
@@ -201,7 +201,7 @@ class EMLExtractor(BaseExtractor):
         return headers
 
     @staticmethod
-    def _part_text(part: EmailMessage) -> str:
+    def _part_text(part: MIMEPart) -> str:
         """Decoded text of a body part, surviving unknown or wrong charsets."""
         try:
             content = part.get_content()

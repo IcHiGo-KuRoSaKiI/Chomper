@@ -244,8 +244,7 @@ class _Level:
 def _parse_level(el: Any) -> _Level:
     level = _Level()
     level.fmt = _val(el.find(f"{W}numFmt")) or "decimal"
-    text = el.find(f"{W}lvlText")
-    level.text = _val(text) if text is not None and _val(text) is not None else ""
+    level.text = _val(el.find(f"{W}lvlText")) or ""
     level.start = _int(_val(el.find(f"{W}start")), 1)
     level.style = _val(el.find(f"{W}pStyle"))
     restart = _val(el.find(f"{W}lvlRestart"))

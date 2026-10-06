@@ -41,7 +41,14 @@ from ..models.html_models import (
 from .base import BaseExtractor
 
 if BS4_AVAILABLE:
-    from .html_markdown import HTMLToMarkdown, main_content, strip_boilerplate
+    from .html_markdown import (
+        HTMLToMarkdown,
+        attr_text,
+        body_of,
+        find_tag,
+        main_content,
+        strip_boilerplate,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -152,17 +159,17 @@ class HTMLExtractor(BaseExtractor):
         html_doc.has_nav = soup.find("nav") is not None
         html_doc.num_headings = len(soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6"]))
 
-        base = soup.find("base", href=True)
-        base_url = self.base_url or (base["href"] if base is not None else None)
+        base_url = self.base_url or attr_text(find_tag(soup, "base", href=True), "href")
         strip_boilerplate(soup, chrome=False)  # scripts, styles, hidden elements
         html_doc.full_text = soup.get_text(separator="\n", strip=True)
         if self.remove_boilerplate:
             strip_boilerplate(soup, chrome=True)  # navigation, sidebars, footers
         converter = HTMLToMarkdown(base_url=base_url)
-        root = main_content(soup) if self.remove_boilerplate else (soup.find("body") or soup)
+        body = body_of(soup)
+        root = main_content(soup) if self.remove_boilerplate else body
         text = converter.convert(root)
-        if not text and root is not soup.find("body") and soup.find("body") is not None:
-            text = converter.convert(soup.find("body"))
+        if not text and root is not body:
+            text = converter.convert(body)
         title = html_doc.metadata.title
         if title and not any(line.startswith("# ") for line in text.splitlines()):
             text = f"# {' '.join(title.split())}\n\n{text}".strip()
@@ -226,17 +233,15 @@ class HTMLExtractor(BaseExtractor):
         for attr, value in _DATE_META:
             if metadata.publish_date:
                 break
-            tag = soup.find("meta", attrs={attr: lambda v, want=value: (v or "").lower() == want})
-            if tag is not None:
-                metadata.publish_date = _parse_date(tag.get("content"))
+            tag = find_tag(soup, "meta", attrs={attr: lambda v, want=value: (v or "").lower() == want})
+            metadata.publish_date = _parse_date(attr_text(tag, "content"))
 
-        html_tag = soup.find("html")
-        if not metadata.language and html_tag is not None and html_tag.get("lang"):
-            metadata.language = html_tag.get("lang")
+        if not metadata.language:
+            metadata.language = attr_text(find_tag(soup, "html"), "lang")
 
-        canonical = soup.find("link", rel="canonical")
-        if canonical and canonical.get("href"):
-            metadata.canonical_url = canonical["href"]
+        canonical = attr_text(find_tag(soup, "link", rel="canonical"), "href")
+        if canonical:
+            metadata.canonical_url = canonical
 
         for script in soup.find_all("script", type="application/ld+json"):
             try:
@@ -257,9 +262,7 @@ class HTMLExtractor(BaseExtractor):
                         metadata.author = name
 
         if not metadata.publish_date:
-            time_tag = soup.find("time", datetime=True)
-            if time_tag is not None:
-                metadata.publish_date = _parse_date(time_tag["datetime"])
+            metadata.publish_date = _parse_date(attr_text(find_tag(soup, "time", datetime=True), "datetime"))
         return metadata
 
     def _extract_tables(self, soup: BeautifulSoup) -> list[HTMLTable]:
@@ -475,7 +478,7 @@ class HTMLExtractor(BaseExtractor):
         Returns:
             Metadata dictionary
         """
-        metadata = {
+        metadata: dict[str, Any] = {
             "format": "html",
             "title": html_doc.metadata.title,
             "description": html_doc.metadata.description,

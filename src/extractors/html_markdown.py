@@ -114,6 +114,24 @@ def _int(value: str, default: int) -> int:
     return int(match.group()) if match else default
 
 
+def find_tag(node: Tag, *args: Any, **kwargs: Any) -> Tag | None:
+    """``node.find(...)`` narrowed to an element (or ``None``)."""
+    found = node.find(*args, **kwargs)
+    return found if isinstance(found, Tag) else None
+
+
+def body_of(soup: Tag) -> Tag:
+    """The ``<body>`` element, or the document itself when there is none."""
+    return find_tag(soup, "body") or soup
+
+
+def attr_text(tag: Tag | None, name: str) -> str | None:
+    """An attribute as one string (``class``-style lists are joined)."""
+    if tag is None or not tag.has_attr(name):
+        return None
+    return _attr(tag, name)
+
+
 def strip_boilerplate(root: Tag, chrome: bool = True) -> None:
     """Remove non-content elements in place (scripts always; page chrome if ``chrome``)."""
     for node in root.find_all(string=lambda s: isinstance(s, _SKIP_NODES)):
@@ -363,7 +381,7 @@ class HTMLToMarkdown:
         if _attr(table, "role") == "presentation" or all(len(cells) <= 1 for cells in cells_per_row):
             # A layout table: its cells are just blocks.
             blocks: list[str] = []
-            caption = table.find("caption")
+            caption = find_tag(table, "caption")
             if caption is not None and caption.find_parent("table") is table:
                 blocks.extend(self._block(caption))
             for cells in cells_per_row:
@@ -386,7 +404,7 @@ class HTMLToMarkdown:
             )
         )
         out = []
-        caption = table.find("caption")
+        caption = find_tag(table, "caption")
         if caption is not None and caption.find_parent("table") is table:
             text = _clean_inline(self._inline_children(caption))
             if text:
@@ -557,6 +575,6 @@ def html_to_markdown(
     """
     soup = BeautifulSoup(html, "lxml")
     strip_boilerplate(soup, chrome=main_only)
-    root = main_content(soup) if main_only else (soup.find("body") or soup)
+    root = main_content(soup) if main_only else body_of(soup)
     converter = HTMLToMarkdown(base_url, image_loader, min_image_width, min_image_height)
     return converter.convert(root), converter.images

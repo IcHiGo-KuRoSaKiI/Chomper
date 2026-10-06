@@ -199,8 +199,9 @@ class CSVExtractor(BaseExtractor):
         candidates.append("utf-8-sig" if data.startswith(b"\xef\xbb\xbf") else "utf-8")
         if CHARDET_AVAILABLE:
             guess = chardet.detect(data[: self.sample_size])
-            if guess.get("encoding") and (guess.get("confidence") or 0) >= 0.5:
-                candidates.append(guess["encoding"])
+            guessed = guess.get("encoding")
+            if guessed and (guess.get("confidence") or 0) >= 0.5:
+                candidates.append(guessed)
         candidates.extend(["cp1252", "latin-1"])
         for encoding in candidates:
             try:

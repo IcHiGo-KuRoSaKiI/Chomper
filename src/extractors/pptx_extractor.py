@@ -214,7 +214,7 @@ class PPTXExtractor(BaseExtractor):
             header += " (hidden)"
         builder = MarkdownBuilder()
         builder.add_block(header)
-        if title:
+        if title and title_shape is not None:
             content.append({"type": "title", "text": title_shape.text_frame.text})
 
         top = [s for s in slide.shapes if title_shape is None or s.shape_id != title_shape.shape_id]
