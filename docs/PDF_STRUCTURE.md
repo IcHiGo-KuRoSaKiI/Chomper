@@ -6,6 +6,14 @@ fixes two defects that made the original PDF path unusable.
 Aimed at long, heavily-formatted documents — textbooks, manuals, reference works —
 where headings, tables and worked calculations carry the structure.
 
+Two PDF paths use this package:
+
+- **Chunking.** `StructuralPDFChunker` (the `auto` strategy for `.pdf`) reads the file
+  directly through `parse_structure` and does not need the extractor's Markdown.
+- **Extraction.** `PDFExtractor` produces the Markdown with the `pymupdf-layout` model
+  (`src/extractors/pdf_layout.py`) and borrows `lists.py`, `figures.py`,
+  `cell_marks.py` and `tables.py` from here to post-process it.
+
 ---
 
 ## Why
@@ -22,17 +30,29 @@ The original `PDFChunker` sliced a flat word list. Measured on a test document, 
 
 ## What is new
 
-`src/pdf_structure/` — six pure stages over a positional line model:
+`src/pdf_structure/` — pure stages over a positional line model:
 
 | Module | Job |
 |---|---|
 | `lines.py` | One `PageLine` per rendered line: font size, weight, bbox, page band. |
 | `noise.py` | Removes running headers, footers and boilerplate. |
 | `headings.py` | Heading levels from font-size tiers + bold promotion + numbering override. |
-| `tables.py` | Geometric table regions, merged and made contiguous so they stay atomic. |
+| `tables.py` | Geometric table regions, merged and made contiguous so they stay atomic; continuation tables inherit their header. |
+| `lists.py` | List markers (glyphs such as `•`, Wingdings `U+F0B7`, labels such as `(a)`, `iv)`, `12)`), wrapped items joined, nesting from marker x positions, flat across column breaks. |
+| `figures.py` | Vector figure regions, caption linking (title bars inside the frame win; side-by-side panels share one caption), `![caption](image:<id>)` markers. |
+| `cell_marks.py` | Check marks, crosses and dots restored into empty table cells from symbol-font codes, vector strokes or tiny icons inside the cell box. |
 | `math_regions.py` | Formula and T-account regions, kept atomic. |
 | `sentences.py` | Reflow, abbreviation-safe sentence splitting, cut verification. |
 | `assemble.py` | Builds blocks and stamps provenance. |
+
+Structural chunks keep one list item per line, legal labels survive verbatim, and
+ligatures are expanded (`ﬂat` reads `flat`). Table cell text is read from page words,
+because importing `pymupdf.layout` makes `Table.extract()` drop spaces and split values
+such as `1.42m`.
+
+On a synthetic set of comparison tables, layout extraction alone kept 35% of cell marks;
+with `cell_marks.py`, 98%. It writes only into empty (or symbol-only) cells, only from
+evidence inside the cell box, and ignores borders, rules and backgrounds.
 
 `src/chunking/strategies/structural_pdf_chunker.py` — `StructuralPDFChunker`,
 now the default for `.pdf`. `PDFChunker` remains importable for page or
@@ -66,7 +86,7 @@ Noise removal strips 4.8% of characters across 20 distinct forms. Extraction is
 
 ## Three findings worth knowing
 
-**Heading levels from `pymupdf4llm` are not usable.** On the real document it emitted
+**Heading levels from `pymupdf4llm` (without the layout model) are not usable.** On the real document it emitted
 1,270 headings of which 1,090 (86%) were H6 and only 2 were H1 — H6 is a catch-all.
 Levels are computed here from font-size tiers instead.
 
@@ -92,8 +112,9 @@ bounding boxes travel with them so a vision model can transcribe them if needed.
 ## Tests
 
 ```bash
-pip install pymupdf pymupdf4llm pysbd pytest
-pytest src/tests/test_pdf_structure.py -q      # 58 tests
+pip install -e ".[dev]"
+pytest src/tests/test_pdf_structure.py -q      # 69 tests
+pytest src/tests/test_pdf_lists.py src/tests/test_pdf_figures.py src/tests/test_cell_marks.py -q
 ```
 
 Fixtures are synthetic, generated at test time by
@@ -121,8 +142,8 @@ Parsing only. Question/option grouping, answer-key cross-referencing
 they are post-text semantic concerns for a later stage. The parser carries no
 course-domain vocabulary.
 
-## New dependencies
+## Dependencies
 
-`pymupdf`, `pymupdf4llm`, `pysbd`. All already optional-PDF territory except `pysbd`,
-which is small and pure Python; the sentence splitter degrades to a guarded regex
-without it.
+`pymupdf` and `pymupdf4llm` (core, pinned to `1.28.2` with `pymupdf-layout`), plus
+`pysbd` from the `sentences` extra. `pysbd` is small and pure Python; the sentence
+splitter degrades to a guarded regex without it.
