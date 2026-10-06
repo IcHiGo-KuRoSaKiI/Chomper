@@ -15,8 +15,8 @@ from src.server.config import (
     OUTPUT_FORMAT_TOON,
 )
 from src.server.helpers import (
-    detect_mime_type,
     count_images_in_structure,
+    detect_mime_type,
     extract_images_from_structure,
     get_extractor_for_file,
     parse_from_base64,
