@@ -1,6 +1,6 @@
-# Contributing to Parser-MCP
+# Contributing to Chomper
 
-Thank you for your interest in contributing to Parser-MCP! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to Chomper! This document provides guidelines and information for contributors.
 
 ## Code of Conduct
 
@@ -44,15 +44,19 @@ By participating in this project, you agree to maintain a respectful and inclusi
 
 **Code Style:**
 - Follow PEP 8 guidelines
-- Use type hints for all function signatures
+- Use type hints for all function signatures (PEP 585 style: `list`, `dict`, `str | None`)
 - Format code with `black .`
 - Lint with `ruff check .`
+- Type check with `mypy` (`disallow_untyped_defs` everywhere except extractors, chunkers and formatters)
 - Maximum line length: 100 characters
+- Chain exceptions (`raise ValueError(...) from e`); error messages should say what was wrong and what to pass instead
+- Keep heavy imports (PyMuPDF, pandas, sentence-transformers) inside the functions that need them; `import server` and `import chomper` must stay cheap
 
 **Testing:**
-- Add tests for new features
+- Add tests for new features in `src/tests/` (pytest's `testpaths`)
 - Ensure all existing tests pass: `pytest`
 - For lightweight testing: `python src/tests/test_lightweight.py`
+- PDF fixtures are generated, not checked in: `python src/tests/fixtures/make_pdf_fixtures.py --list`
 
 **Documentation:**
 - Update README.md if adding new features
@@ -87,57 +91,62 @@ If you want to add support for a new file format:
 
 1. **Create the extractor** in `src/extractors/`:
    ```python
-   from .base_extractor import BaseExtractor
-   from ..models import RawDocument
+   from ..models.document import RawDocument
+   from .base import BaseExtractor
 
    class NewFormatExtractor(BaseExtractor):
        SUPPORTED_EXTENSIONS = [".ext"]
 
        def extract(self, file_path: str) -> RawDocument:
-           # Implementation
+           # Implementation: return Markdown text; record images with
+           # image_utils.image_record() and mark them with image_marker()
            pass
    ```
 
-2. **Handle optional dependencies** gracefully:
+2. **Handle optional dependencies** gracefully, with a module-level flag:
    ```python
    try:
        import optional_library
-       HAS_OPTIONAL = True
+       OPTIONAL_AVAILABLE = True
    except ImportError:
-       HAS_OPTIONAL = False
+       OPTIONAL_AVAILABLE = False
    ```
 
-3. **Register in `src/extractors/__init__.py`**
+3. **Add the class to `_SOURCES`** in `src/extractors/__init__.py` (classes load on first access)
 
-4. **Add to server.py**:
-   - Import with try/except
-   - Add to `FORMAT_DESCRIPTIONS`
-   - Register in `_initialize_extractors()`
+4. **Register in `src/server/config.py`**:
+   - Add the extension to `FORMAT_DESCRIPTIONS`
+   - Add an `_EXTRACTOR_SPECS` entry: `(module, class name, ("OPTIONAL_AVAILABLE",), "'chomper[ext]'")`; the registry reports the format unavailable, with that install hint, when a flag is false
+   - Add a `_CHUNKER_SPECS` entry (e.g. `TextChunker`)
 
-5. **Update requirements.txt** with optional dependency
+5. **Add the dependency as an extra** in `pyproject.toml` (and include it in `all`), and in `requirements.txt`
 
 6. **Add tests** in `src/tests/`
 
 7. **Update documentation**:
    - README.md supported formats table
-   - CLAUDE.md conventions section
+   - docs/COMPONENTS.md extractor section
 
 ## Adding New Chunking Strategies
 
 1. Create in `src/chunking/strategies/`
-2. Inherit from `BaseChunker`
-3. Implement `chunk()` method
-4. Register in `__init__.py`
-5. Add to server.py `parse_document_chunked` tool
+2. Inherit from `BaseChunker`; accept `target_size` and `overlap` in the constructor
+3. Implement `chunk()` method (use `src/chunking/text_splitter.py` for free text, so chunks stay exact slices and never split code fences or table rows)
+4. Register in `src/chunking/strategies/__init__.py`
+5. Wire it into `build_chunker()` in `src/server/documents.py` (a format-specific chunker goes in `_CHUNKER_SPECS` in `src/server/config.py`; a new strategy name goes in `CHUNK_STRATEGIES` and the `chunking_strategy` enum in `src/server/tools.py`). The library, CLI and MCP server all pick it up from there.
 
 ## Project Structure
 
 ```
 src/
+├── server/          # Config, lazy registries, shared loader, cache, tool schemas
+├── handlers/        # MCP tool handlers
 ├── extractors/      # Add new format extractors here
-├── chunking/        # Chunking strategies
+├── pdf_structure/   # Structural PDF parsing (headings, tables, lists, figures)
+├── chunking/        # Chunking strategies and the shared text splitter
 ├── enrichment/      # Content enrichers (keywords, sections)
 ├── formatters/      # Output formatters (JSON, TOON)
+├── cli/             # chomper-parse formatters, watch mode, REPL
 ├── prompts/         # MCP prompt definitions
 ├── models/          # Data models
 └── tests/           # Test suites

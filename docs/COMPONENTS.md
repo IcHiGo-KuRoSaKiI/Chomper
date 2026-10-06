@@ -5,6 +5,7 @@ Detailed documentation for all Chomper components: extractors, chunkers, enriche
 ## Table of Contents
 
 - [Extractors](#extractors)
+- [Images](#images)
 - [Chunkers](#chunkers)
 - [Enrichers](#enrichers)
 - [Formatters](#formatters)
@@ -15,7 +16,9 @@ Detailed documentation for all Chomper components: extractors, chunkers, enriche
 
 ## Extractors
 
-Extractors are responsible for converting files into `RawDocument` objects containing text, metadata, and optional structure information.
+Extractors are responsible for converting files into `RawDocument` objects containing text, metadata, and optional structure information. Rich formats produce Markdown: headings, nested lists, GFM tables, fenced code and `![caption](image:<id>)` image markers.
+
+Extractor classes are imported on first use (`src/extractors/__init__.py`); one whose dependency is missing resolves to `None`.
 
 ### Base Class
 
@@ -33,18 +36,18 @@ class BaseExtractor(ABC):
         """
         pass
 
-    def validate_file(self, file_path: str) -> Path:
+    def validate_file(self, file_path: str) -> None:
         """Validate file exists and has supported extension."""
         pass
 
-    def _get_basic_metadata(self, file_path: Path) -> Dict[str, Any]:
+    def _get_basic_metadata(self, file_path: str) -> dict:
         """Return basic file metadata (name, size, extension)."""
         pass
 ```
 
-### Always Available Extractors
+Text formats (text, code, Markdown, JSON, YAML, RTF) decode through `encoding_utils.read_text`: BOM, strict UTF-8, cp1252 for Western text, charset-normalizer, then latin-1. The encoding used is recorded in `metadata["encoding"]`.
 
-These extractors use only Python standard library:
+### Extractors Without Extra Dependencies
 
 #### CodeExtractor
 **Extensions**: `.py`, `.js`, `.jsx`, `.ts`, `.tsx`, `.java`, `.cpp`, `.c`, `.go`, `.rs`
@@ -68,7 +71,7 @@ doc = extractor.extract("main.py")
 # - Paragraph detection
 # - Line/word/character counts
 
-extractor = TextExtractor()
+extractor = TextExtractor(detect_paragraphs=True)
 doc = extractor.extract("readme.txt")
 ```
 
@@ -77,13 +80,13 @@ doc = extractor.extract("readme.txt")
 
 ```python
 # Features:
-# - Heading hierarchy detection
+# - Heading hierarchy detection (ignores fenced code and front matter;
+#   `---` is a setext underline only under paragraph text)
 # - Code block identification
 # - Link extraction
 
 extractor = MarkdownExtractor()
 doc = extractor.extract("README.md")
-# doc.structure includes: headings, code_blocks, links
 ```
 
 #### JSONExtractor
@@ -91,7 +94,7 @@ doc = extractor.extract("README.md")
 
 ```python
 # Features:
-# - Pretty-printed output
+# - Pretty-printed output; a UTF-8 BOM is accepted
 # - Structure analysis (keys, depth, array/object counts)
 # - Max depth limiting
 
@@ -104,63 +107,81 @@ doc = extractor.extract("config.json")
 
 ```python
 # Features:
-# - Header parsing (From, To, Subject, Date)
-# - Body extraction (plain text and HTML)
-# - Attachment listing
+# - Header parsing (From, To, CC, Subject, Date)
+# - Body: the text/plain part, otherwise the HTML part converted to Markdown
+#   with the shared HTML walker; never truncated (metadata["body_source"])
+# - cid: inline images become image records (img-<n>) with markers
+# - Attachment list with type and size (also in metadata)
 
 extractor = EMLExtractor(include_headers=True, include_attachments=True)
 doc = extractor.extract("email.eml")
 ```
 
-### Optional Extractors
-
-These require additional dependencies:
+### Extractors Using Core Dependencies
 
 #### PDFExtractor
 **Extensions**: `.pdf`
-**Dependencies**: `pymupdf`, optional `pymupdf4llm`
+**Dependencies**: `pymupdf`, `pymupdf4llm`, `pymupdf-layout` (all `==1.28.2`)
 
 ```python
 # Features:
-# - Text extraction with layout preservation
-# - Markdown table formatting (with pymupdf4llm)
-# - Image extraction with position info
-# - Page-by-page structure
+# - One pymupdf-layout pass (src/extractors/pdf_layout.py): text, headings,
+#   nested lists, tables and figures in reading order
+# - Tables rendered from the model's cell grid; check marks restored
+#   (src/pdf_structure/cell_marks.py); continued tables get their header back
+# - Figures (raster and vector) marked as ![caption](image:p<page>-<n>)
+# - Running headers/footers dropped only when they repeat or are page numbers
+# - Scanned pages reported, and OCR'd when Tesseract or RapidOCR is installed
 
 extractor = PDFExtractor(
-    use_markdown=True,           # Use pymupdf4llm for better tables
-    table_strategy='lines_strict' # Table detection strategy
+    backend="auto",               # "layout" when pymupdf-layout is installed, else "legacy"
+    ocr="auto",                   # "off" or "force"; layout backend only
+    table_format="markdown",      # or "html" (keeps merged cells); layout backend only
+    extract_vector_figures=True,  # treat vector charts/diagrams as figures
 )
 doc = extractor.extract("report.pdf")
 # doc.structure includes: pages[], images[]
+# doc.metadata includes: page_count, extraction_method ("pymupdf-layout"),
+#   pages_without_text_layer / ocr_pages / warning when pages are scanned
 ```
 
+Measured on 378 ground-truth tables (ICDAR-2013 corrected + SciTSR) against the previous `pymupdf4llm` + `find_tables` path: table adjacency F1 0.894 (was 0.421), detection F1 0.962 (was 0.776), at about 0.13 s/page. `backend="legacy"` keeps the old path (it also accepts `use_markdown` and `table_strategy`).
+
 #### DOCXExtractor
-**Extensions**: `.docx`, `.doc`
+**Extensions**: `.docx` (`.doc` is recognised, but legacy binary Word files raise a clear error)
 **Dependencies**: `python-docx`
 
 ```python
 # Features:
-# - Paragraph extraction
-# - Heading detection
-# - Table extraction
-# - Style preservation
+# - Body XML walked in document order: content controls, text boxes,
+#   nested tables and images in cells are kept
+# - Real list numbering from numbering.xml (formats, start overrides,
+#   per-list counters), nesting by indent
+# - Title -> "#", Heading N shifted below it
+# - GFM tables (spanned cells left empty), footnotes as Markdown footnotes,
+#   links, bold and italic; headers/footers go to metadata
+# - Images as img-<n> records with markers
 
 extractor = DOCXExtractor()
 doc = extractor.extract("document.docx")
 ```
 
 #### PPTXExtractor
-**Extensions**: `.pptx`, `.ppt`
+**Extensions**: `.pptx` (`.ppt` is recognised, but legacy binary files raise a clear error)
 **Dependencies**: `python-pptx`
 
 ```python
 # Features:
-# - Slide-by-slide extraction
-# - Speaker notes
-# - Shape text extraction
+# - Each slide starts with "## Slide N: <title>"
+# - Shapes in reading order (top-to-bottom, left-to-right, groups kept together)
+# - Bullets and auto-numbering resolved from the paragraph, layout and master,
+#   with nesting levels
+# - Tables as GFM, charts as a title/type line plus a data table,
+#   SmartArt text as a bullet list
+# - Speaker notes under "### Notes"
+# - Images as s<slide>-<n> records with alt text and markers
 
-extractor = PPTXExtractor()
+extractor = PPTXExtractor(extract_notes=True)
 doc = extractor.extract("presentation.pptx")
 ```
 
@@ -170,57 +191,36 @@ doc = extractor.extract("presentation.pptx")
 
 ```python
 # Features:
-# - Sheet-by-sheet extraction
-# - Cell type detection
-# - Formula handling
+# - Output bounded to cells that hold data; tables split at empty rows
+# - Merged title rows become headings; real header row detected
+# - Merged values kept in the top-left cell only
+# - Number formats followed: ISO dates, percentages, thousands, decimals
+# - Formulas without a cached value shown as formula text
+# - Hidden sheets marked and listed in metadata["hidden_sheets"]
+# - structure["sheets"][i]["markdown"] is the reader Markdown;
+#   structure["sheets"][i]["text"] is a row-aligned grid for ExcelChunker
 
 extractor = ExcelExtractor()
 doc = extractor.extract("data.xlsx")
 ```
 
-#### CSVExtractor
-**Extensions**: `.csv`, `.tsv`
-**Dependencies**: `pandas`, `chardet`
-
-```python
-# Features:
-# - Auto-delimiter detection (, ; \t |)
-# - Encoding auto-detection
-# - Header inference
-
-extractor = CSVExtractor(
-    delimiter=None,   # Auto-detect
-    encoding=None,    # Auto-detect via chardet
-    has_header=None   # Auto-detect
-)
-doc = extractor.extract("data.csv")
-```
-
 #### HTMLExtractor
 **Extensions**: `.html`, `.htm`
-**Dependencies**: `beautifulsoup4`, `trafilatura`, `lxml`
+**Dependencies**: `beautifulsoup4`, `lxml`
 
 ```python
 # Features:
-# - Main content extraction (via trafilatura)
-# - Semantic structure preservation
-# - Metadata extraction (title, description)
+# - One parse; DOM-to-Markdown walker (src/extractors/html_markdown.py),
+#   shared with EPUB and email
+# - Headings, nested ordered/unordered lists (start/type/value), GFM tables
+#   with colspan/rowspan, fenced code, quotes, figures, definition lists,
+#   links and images
+# - Scripts, styles, nav, headers, footers, asides and hidden elements stripped
+# - data: images become image records (img-<n>)
+# - Metadata (title, description, ...) read from the same tree
 
 extractor = HTMLExtractor()
 doc = extractor.extract("page.html")
-```
-
-#### YAMLExtractor
-**Extensions**: `.yaml`, `.yml`
-**Dependencies**: `pyyaml`
-
-```python
-# Features:
-# - Multi-document support
-# - Structure analysis
-
-extractor = YAMLExtractor(indent=2)
-doc = extractor.extract("config.yaml")
 ```
 
 #### XMLExtractor
@@ -229,23 +229,55 @@ doc = extractor.extract("config.yaml")
 
 ```python
 # Features:
-# - Pretty-printed output
+# - One representation: fenced XML for data documents, text for prose
+# - External entities are not resolved
 # - Tag/attribute analysis
-# - Depth limiting
 
-extractor = XMLExtractor(pretty_print=True, max_depth=10)
+extractor = XMLExtractor(include_comments=False, strip_namespaces=False)
 doc = extractor.extract("data.xml")
+```
+
+### Extractors Using Extras
+
+#### CSVExtractor
+**Extensions**: `.csv`, `.tsv`
+**Dependencies**: `pandas`, `chardet` (`pip install 'chomper[csv]'`)
+
+```python
+# Features:
+# - One GFM table; values exactly as written (integers stay integers)
+# - Delimiter detected across the first lines (, ; TAB |), Excel "sep=" hint honoured
+# - Encoding detection (metadata["encoding"]); preamble lines kept out of the header
+# - Malformed rows padded or merged, never dropped; listed in
+#   metadata["bad_lines"] and metadata["bad_line_count"]
+
+extractor = CSVExtractor(
+    delimiter=None,   # Auto-detect
+    encoding=None,    # Auto-detect
+    has_header=None   # Auto-detect
+)
+doc = extractor.extract("data.csv")
+```
+
+#### YAMLExtractor
+**Extensions**: `.yaml`, `.yml`
+**Dependencies**: `pyyaml` (`pip install 'chomper[yaml]'`)
+
+```python
+# Features:
+# - Source passed through in its original order
+# - Multi-document support, structure analysis
+
+extractor = YAMLExtractor(indent=2)
+doc = extractor.extract("config.yaml")
 ```
 
 #### MSGExtractor
 **Extensions**: `.msg`
-**Dependencies**: `extract-msg`
+**Dependencies**: `extract-msg` (`pip install 'chomper[email]'`)
 
 ```python
-# Features:
-# - Outlook message parsing
-# - Attachment extraction
-# - Rich header support
+# Same output layout as EMLExtractor: headers, body, inline images, attachments
 
 extractor = MSGExtractor(include_headers=True, include_attachments=True)
 doc = extractor.extract("email.msg")
@@ -253,29 +285,28 @@ doc = extractor.extract("email.msg")
 
 #### EPUBExtractor
 **Extensions**: `.epub`
-**Dependencies**: `ebooklib`, `beautifulsoup4`
+**Dependencies**: `ebooklib`, `beautifulsoup4` (`pip install 'chomper[epub]'`)
 
 ```python
 # Features:
-# - Chapter extraction
-# - Table of contents
+# - Chapters in spine (reading) order, converted to Markdown
+# - Short chapters kept; headings not duplicated (a heading-less chapter
+#   gets its TOC title)
+# - Images stored in the book become img-<n> records with markers
 # - Metadata (author, title, etc.)
 
-extractor = EPUBExtractor(
-    include_toc=True,
-    chapter_separator="\n\n---\n\n"
-)
+extractor = EPUBExtractor(include_toc=True, chapter_separator="\n\n")
 doc = extractor.extract("book.epub")
 ```
 
 #### RTFExtractor
 **Extensions**: `.rtf`
-**Dependencies**: `striprtf`
+**Dependencies**: `striprtf` (`pip install 'chomper[rtf]'`)
 
 ```python
 # Features:
-# - RTF tag stripping
-# - Text content extraction
+# - Bullets and numbering kept as Markdown lists, nested by level
+# - Tables as GFM pipe tables
 
 extractor = RTFExtractor()
 doc = extractor.extract("document.rtf")
@@ -283,9 +314,20 @@ doc = extractor.extract("document.rtf")
 
 ---
 
+## Images
+
+`src/extractors/image_utils.py` is shared by every extractor and entry point.
+
+- **Lazy records.** Extractors call `image_record(...)` with size, position, page, a stable `id` and a loader. Nothing is decoded during a text-only parse.
+- **Markers.** `image_marker(id, alt)` writes `![alt](image:<id>)` into the text. Ids are `p<page>-<n>` (PDF), `s<slide>-<n>` (PPTX) and `img-<n>` (DOCX, HTML, EPUB, email).
+- **On request.** `collect_images(structure, page_filter=None, max_images=None, max_dimension=1568, image_id=None)` finds records however the extractor nested them, applies the filters, then loads, converts (PNG/JPEG/GIF/WebP, RGB-family) and downscales only the images it returns, capping each at 3.5 MB. Identical images are returned once with `pages` and `aliases`.
+- **PDF vector figures** are rendered from their page region only when requested. PDF image loads take the shared PyMuPDF lock (`src/extractors/pymupdf_lock.py`).
+
+---
+
 ## Chunkers
 
-Chunkers split `RawDocument` text into smaller, manageable `Chunk` objects.
+Chunkers split `RawDocument` text into smaller, manageable `Chunk` objects. Build them with `build_chunker()` in `src/server/documents.py`, which the library, CLI and MCP server all use.
 
 ### Base Class
 
@@ -293,30 +335,43 @@ Chunkers split `RawDocument` text into smaller, manageable `Chunk` objects.
 class BaseChunker(ABC):
     """Abstract base class for all chunkers."""
 
-    def __init__(self, target_size: int = 1000, overlap: int = 100):
-        self.target_size = target_size  # Target words per chunk
+    def __init__(self, target_size: int = 300, overlap: int = 50, preserve_context: bool = True):
+        self.target_size = target_size  # Maximum words per chunk
         self.overlap = overlap          # Words to overlap
 
     @abstractmethod
-    def chunk(self, raw_doc: RawDocument) -> List[Chunk]:
+    def chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """Split document into chunks."""
         pass
 
     # Helper methods:
-    def _split_by_word_count(self, text: str) -> List[str]
-    def _split_by_paragraphs(self, text: str) -> List[str]
-    def _split_by_sentences(self, text: str) -> List[str]
+    def _split_by_word_count(self, text: str) -> list[str]
+    def _split_by_paragraphs(self, text: str) -> list[str]
+    def _split_by_sentences(self, text: str) -> list[str]
     def _create_chunk(self, text: str, chunk_id: int, start: int, end: int) -> Chunk
 ```
 
+`build_chunker()` passes `target_size=chunk_size` (default 1000) and `overlap` (default 100).
+
+### Structure-Aware Splitting
+
+`src/chunking/text_splitter.py` is used by the Text, Markdown, DOCX, HTML and PPTX-fallback chunkers:
+
+- Chunks are exact substrings (`text[start:end]`), so line breaks, list indentation, table rows and code fences survive and offsets are true.
+- Cuts prefer headings, then blank lines, lines, sentences, and finally words; never inside a code fence or Markdown table row, never right after a heading.
+- Every chunk adds at least one new unit, so the loop always terminates whatever the overlap; `overlap=0` is honoured.
+
 ### Format-Specific Chunkers
 
-#### PDFChunker
-Respects page boundaries:
+#### StructuralPDFChunker
+Default for `.pdf` on `auto`. Reads the PDF directly (`src/pdf_structure/`): heading-bounded, table-safe and sentence-safe blocks with provenance. See [PDF_STRUCTURE.md](PDF_STRUCTURE.md).
 ```python
-chunker = PDFChunker(target_size=500, overlap=50)
-# Keeps content from same page together when possible
+chunker = StructuralPDFChunker(target_size=500, overlap=50)
+chunks = chunker.chunk_path("report.pdf", "report.pdf")
 ```
+
+#### PDFChunker
+Page or word-count slicing of an extracted PDF; still importable, no longer the default.
 
 #### DOCXChunker
 Preserves heading hierarchy:
@@ -324,6 +379,9 @@ Preserves heading hierarchy:
 chunker = DOCXChunker(target_size=500)
 # Respects heading boundaries
 ```
+
+#### PPTXChunker
+Slide-aware; `section_name` is the slide title.
 
 #### CodeChunker
 Respects function/class boundaries:
@@ -336,7 +394,7 @@ chunker = CodeChunker(target_size=300)
 Respects heading structure:
 ```python
 chunker = MarkdownChunker(target_size=500)
-# Splits at heading boundaries
+# Splits at heading boundaries; metadata carries heading_path and heading_level
 ```
 
 #### HTMLChunker
@@ -346,9 +404,15 @@ chunker = HTMLChunker(target_size=500)
 # Respects semantic HTML elements
 ```
 
+#### ExcelChunker
+By sheet and table (also used for CSV/TSV); `section_name` is the sheet name.
+
+#### TextChunker
+Plain text, and the `recursive` (structure-first) and `fixed` (word windows on line breaks) strategies.
+
 ### SemanticChunker
 
-Embedding-based chunking for RAG applications:
+Embedding-based chunking for RAG applications (needs `pip install 'chomper[semantic]'`):
 
 ```python
 class SemanticChunker(BaseChunker):
@@ -362,11 +426,7 @@ class SemanticChunker(BaseChunker):
         "balanced": "all-mpnet-base-v2",  # ~420MB, better quality
     }
 
-    STRATEGIES = {
-        "percentile": "Break at distances > Nth percentile",
-        "standard_deviation": "Break at N std devs from mean",
-        "interquartile": "Break outside IQR"
-    }
+    STRATEGIES = ["percentile", "standard_deviation", "interquartile"]
 
     def __init__(
         self,
@@ -375,17 +435,18 @@ class SemanticChunker(BaseChunker):
         model: str = "fast",
         breakpoint_strategy: str = "percentile",
         breakpoint_threshold: float = 0.5,
-        min_chunk_size: int = 50
+        min_chunk_size: int = 50,
+        preserve_context: bool = True,
     ):
         ...
 
-    def chunk(self, raw_doc: RawDocument) -> List[Chunk]:
+    def chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         # 1. Split into sentences
         # 2. Compute embeddings (lazy model loading)
         # 3. Calculate cosine distances between adjacent sentences
         # 4. Find breakpoints using strategy
-        # 5. Group sentences into chunks
-        # 6. Apply overlap
+        # 5. Group sentences; small groups merge forward (no text is lost)
+        # 6. Enforce target_size as a maximum and apply overlap
 ```
 
 **Usage Example**:
@@ -394,7 +455,7 @@ chunker = SemanticChunker(
     model="fast",                      # Quick embedding model
     breakpoint_strategy="percentile",  # Break at high-distance points
     breakpoint_threshold=0.75,         # 75th percentile
-    target_size=300,                   # ~300 words per chunk
+    target_size=300,                   # at most ~300 words per chunk
     overlap=50                         # 50 word overlap
 )
 
@@ -405,41 +466,43 @@ chunks = chunker.chunk(raw_doc)
 
 ## Enrichers
 
-Enrichers add computed metadata to chunks.
+Enrichers add computed metadata to chunks. Each takes a list of chunks and returns `EnrichedChunk`s: `enrich(chunks: list[Chunk]) -> list[EnrichedChunk]`. `DocumentPipeline` runs all four by default; the library, CLI and MCP tools use only TF-IDF keywords, on request.
 
 ### KeywordExtractor
 
 Extracts important terms from text:
 ```python
-enricher = KeywordExtractor(max_keywords=10, method="tfidf")
-keywords = enricher.extract(chunk.text)
-# Returns: ["important", "terms", "from", "text"]
+enricher = KeywordExtractor(method="tfidf", top_k=8)   # or method="rake" (default)
+enriched = enricher.enrich(chunks)
+
+# IDF fitted across all of a document's chunks (what keywords=True uses):
+keywords = enricher.keywords_for_texts([c.text for c in chunks])
 ```
+TF-IDF needs scikit-learn (`keywords` extra) and falls back to RAKE without it. URLs, link targets and image file names are stripped before scoring.
 
 ### SectionDetector
 
 Identifies document sections:
 ```python
-detector = SectionDetector()
-section = detector.detect(chunk.text, position=0.1)
-# Returns: "Introduction" | "Methods" | "Results" | etc.
+detector = SectionDetector(method="heuristic")
+enriched = detector.enrich(chunks)
+# section_name: "Introduction" | "Methods" | "Results" | etc.
 ```
 
 ### TitleGenerator
 
 Generates titles for sections:
 ```python
-generator = TitleGenerator()
-title = generator.generate(chunk.text)
-# Returns: "Overview of Machine Learning Concepts"
+generator = TitleGenerator(method="first_sentence", max_length=80)
+enriched = generator.enrich(chunks)
 ```
 
 ### MetadataEnricher
 
 Adds computed metadata:
 ```python
-enricher = MetadataEnricher()
-metadata = enricher.enrich(chunk)
+enricher = MetadataEnricher(reading_speed=200)
+enriched = enricher.enrich(chunks)
 # Adds: reading_time, complexity_score, etc.
 ```
 
@@ -447,18 +510,15 @@ metadata = enricher.enrich(chunk)
 
 ## Formatters
 
-Formatters convert `ProcessedDocument` to output strings.
+Formatters convert `ProcessedDocument` to output.
 
 ### SimpleFormatter
 
-Standard JSON output:
+Plain dictionary output:
 ```python
-formatter = SimpleFormatter(
-    include_metadata=True,
-    include_keywords=True
-)
+formatter = SimpleFormatter(include_metadata=True)
 output = formatter.format(document)
-# Returns: JSON string
+# Returns: dict
 ```
 
 ### TOONFormatter
@@ -489,7 +549,9 @@ output = TOONFormatter.format_raw(
 output = TOONFormatter.format_metadata_only(
     file_path="doc.pdf",
     metadata={...},
-    doc_info={...}
+    doc_type="pdf",
+    total_chars=10000,
+    page_count=5
 )
 
 # For chunk response:
@@ -498,7 +560,8 @@ output = TOONFormatter.format_chunk_response(
     text="chunk content...",
     offset=5000,
     limit=5000,
-    total_chars=50000
+    total_chars=50000,
+    has_more=True
 )
 ```
 
@@ -520,9 +583,9 @@ k:keyword3,keyword4
 
 Vector database format:
 ```python
-formatter = WeaviateFormatter(class_name="Document")
+formatter = WeaviateFormatter(collection_name="Document")
 output = formatter.format(document)
-# Returns: Weaviate-compatible objects
+# Returns: list of Weaviate objects
 ```
 
 ### Neo4jFormatter
@@ -531,35 +594,35 @@ Graph database format:
 ```python
 formatter = Neo4jFormatter()
 output = formatter.format(document)
-# Returns: Cypher-compatible data
+# Returns: dict with document_node, chunk_nodes, section_nodes and relationships
 ```
 
 ---
 
 ## Handlers
 
-Handlers implement MCP tool logic.
+Handlers implement MCP tool logic. Each async handler validates its arguments and runs the blocking work in a worker thread (`run_blocking`), reading documents through the shared cache. Errors are raised and turned into `isError` results by `server.dispatch_tool`.
 
 ### parse.py
 
 ```python
-async def handle_parse_document(arguments: dict) -> List[TextContent | ImageContent]:
+async def handle_parse_document(arguments: dict) -> list[TextContent | ImageContent]:
     """
     Main document parsing handler.
 
     Arguments:
         file_path: Absolute path to document
         full_text: Return all text (default: False, returns 5000 chars)
-        include_images: Include images (default: False)
+        include_images: Include up to 5 images (default: False)
         output_format: "json" or "toon"
 
     Returns:
-        [TextContent(text), TextContent(metadata), ImageContent[]...]
+        [TextContent(text), TextContent(metadata), (TextContent(info), ImageContent)...]
     """
 
-async def handle_parse_document_bytes(arguments: dict) -> List[TextContent | ImageContent]:
+async def handle_parse_document_bytes(arguments: dict) -> list[TextContent | ImageContent]:
     """
-    Parse base64-encoded document.
+    Parse base64-encoded document (decoded size at most 100 MB, never cached).
 
     Arguments:
         content_base64: Base64-encoded file content
@@ -574,13 +637,13 @@ async def handle_parse_document_bytes(arguments: dict) -> List[TextContent | Ima
 ### chunk.py
 
 ```python
-async def handle_get_document_chunk(arguments: dict) -> List[TextContent]:
+async def handle_get_document_chunk(arguments: dict) -> list[TextContent]:
     """
     Paginated document retrieval.
 
     Arguments:
         file_path: Document path
-        offset: Character offset (default: 0)
+        offset: Character offset (default: 0; must be inside the document)
         limit: Max characters (default: 5000)
         output_format: "json" or "toon"
 
@@ -588,16 +651,17 @@ async def handle_get_document_chunk(arguments: dict) -> List[TextContent]:
         [TextContent(chunk), TextContent(metadata)]
     """
 
-async def handle_parse_document_chunked(arguments: dict) -> List[TextContent]:
+async def handle_parse_document_chunked(arguments: dict) -> list[TextContent]:
     """
-    Semantic chunking for RAG.
+    Chunking for RAG, through chunk_document().
 
     Arguments:
         file_path: Document path
-        chunk_size: Target words per chunk (default: 1000)
+        chunk_size: Maximum words per chunk (default: 1000)
         overlap: Overlap words (default: 100)
-        chunking_strategy: "auto", "semantic", "fixed", "recursive"
+        chunking_strategy: "auto", "recursive", "fixed", "semantic"
         embedding_model: "fast" or "balanced"
+        include_keywords: TF-IDF keywords per chunk (default: False)
         output_format: "json" or "toon"
 
     Returns:
@@ -608,26 +672,28 @@ async def handle_parse_document_chunked(arguments: dict) -> List[TextContent]:
 ### images.py
 
 ```python
-async def handle_get_document_images(arguments: dict) -> List[TextContent | ImageContent]:
+async def handle_get_document_images(arguments: dict) -> list[TextContent | ImageContent]:
     """
     On-demand image retrieval.
 
     Arguments:
         file_path: Document path
-        page: Specific page (1-indexed, optional)
+        page: Specific page or slide (1-indexed, optional)
         max_images: Limit (default: 5)
+        image_id: Only the image with this id (from an ![...](image:<id>) marker)
+        max_dimension: Long-edge cap in pixels (default: 1568; 0 = full size)
 
     Returns:
-        [TextContent(summary), ImageContent[]...]
+        [TextContent(summary), (TextContent(image info), ImageContent)...]
     """
 ```
 
 ### metadata.py
 
 ```python
-async def handle_extract_metadata(arguments: dict) -> List[TextContent]:
+async def handle_extract_metadata(arguments: dict) -> list[TextContent]:
     """
-    Quick metadata extraction.
+    Metadata extraction (cached extraction reused).
 
     Arguments:
         file_path: Document path
@@ -637,9 +703,9 @@ async def handle_extract_metadata(arguments: dict) -> List[TextContent]:
         [TextContent(metadata_json)]
     """
 
-async def handle_list_supported_formats(arguments: dict) -> List[TextContent]:
+async def handle_list_supported_formats(arguments: dict) -> list[TextContent]:
     """
-    List available formats.
+    List formats with availability and install hints.
 
     Returns:
         [TextContent(formats_json)]
@@ -649,14 +715,15 @@ async def handle_list_supported_formats(arguments: dict) -> List[TextContent]:
 ### batch.py
 
 ```python
-async def handle_batch_parse(arguments: dict) -> List[TextContent]:
+async def handle_batch_parse(arguments: dict) -> list[TextContent]:
     """
-    Batch document processing.
+    Batch document processing: up to 500 files, min(4, CPUs) at a time,
+    results in input order.
 
     Arguments:
         file_paths: Array of paths
         options:
-            include_images: bool (default: False)
+            include_images: bool (default: False) - adds image_count
             continue_on_error: bool (default: True)
 
     Returns:
@@ -674,9 +741,9 @@ async def handle_batch_parse(arguments: dict) -> List[TextContent]:
 @dataclass
 class RawDocument:
     """Output from extractors."""
-    text: str                           # Full extracted text
-    metadata: Dict[str, Any]            # File metadata
-    structure: Optional[Dict] = None    # Pages, sections, images
+    text: str                                       # Full extracted text
+    metadata: dict[str, Any] = field(default_factory=dict)  # File metadata
+    structure: dict[str, Any] | None = None         # Pages, sections, images
 ```
 
 ### Chunk
@@ -687,9 +754,9 @@ class Chunk:
     """Output from chunkers."""
     chunk_id: int
     text: str
-    start_char: int
-    end_char: int
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    start_char: int = 0
+    end_char: int = 0
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def word_count(self) -> int:
@@ -702,10 +769,10 @@ class Chunk:
 @dataclass
 class EnrichedChunk(Chunk):
     """Output from enrichers."""
-    keywords: List[str] = field(default_factory=list)
-    section_name: Optional[str] = None
+    keywords: list[str] = field(default_factory=list)
+    section_name: str | None = None
     section_type: str = "text"
-    computed_metadata: Dict[str, Any] = field(default_factory=dict)
+    computed_metadata: dict[str, Any] = field(default_factory=dict)
 ```
 
 ### ProcessedDocument
@@ -717,8 +784,8 @@ class ProcessedDocument:
     document_id: str
     source: str
     doc_type: str
-    chunks: List[EnrichedChunk]
-    metadata: Dict[str, Any]
+    chunks: list[EnrichedChunk]
+    metadata: dict[str, Any]
 ```
 
 ---
@@ -729,37 +796,51 @@ class ProcessedDocument:
 
 1. Create `src/extractors/my_extractor.py`:
 ```python
+from ..models.document import RawDocument
 from .base import BaseExtractor
-from src.models import RawDocument
+
+try:
+    import my_library
+    MY_LIBRARY_AVAILABLE = True
+except ImportError:
+    MY_LIBRARY_AVAILABLE = False
 
 class MyExtractor(BaseExtractor):
+    SUPPORTED_EXTENSIONS = [".myext"]
+
     def extract(self, file_path: str) -> RawDocument:
-        path = self.validate_file(file_path)
-        text = self._extract_text(path)
-        metadata = self._get_basic_metadata(path)
+        self.validate_file(file_path)
+        text = ...
+        metadata = self._get_basic_metadata(file_path)
         return RawDocument(text=text, metadata=metadata)
 ```
 
-2. Add to `src/extractors/__init__.py`
+2. Add the class to `_SOURCES` in `src/extractors/__init__.py`
 3. Register in `src/server/config.py`:
 ```python
-EXTRACTORS[".myext"] = MyExtractor
 FORMAT_DESCRIPTIONS[".myext"] = "My format description"
+_EXTRACTOR_SPECS[".myext"] = (
+    "src.extractors.my_extractor", "MyExtractor",
+    ("MY_LIBRARY_AVAILABLE",),        # flags that must be true
+    "'chomper[myext]'",               # install hint
+)
+_CHUNKER_SPECS[".myext"] = ("src.chunking.strategies.text_chunker", "TextChunker", (), "")
 ```
+4. Add an extra for the dependency in `pyproject.toml` (and `requirements.txt`)
 
 ### Adding a New Chunker
 
 1. Create `src/chunking/strategies/my_chunker.py`:
 ```python
-from .base import BaseChunker
+from ..base import BaseChunker
 
 class MyChunker(BaseChunker):
-    def chunk(self, raw_doc: RawDocument) -> List[Chunk]:
-        # Implementation
+    def chunk(self, raw_doc: RawDocument) -> list[Chunk]:
+        # Implementation; prefer src/chunking/text_splitter.py for free text
 ```
 
 2. Add to `src/chunking/strategies/__init__.py`
-3. Register in `src/server/config.py`
+3. Register the extension in `_CHUNKER_SPECS` in `src/server/config.py`. It is constructed by `build_chunker()` as `MyChunker(target_size=chunk_size, overlap=overlap)`.
 
 ### Adding a New Formatter
 
@@ -768,7 +849,7 @@ class MyChunker(BaseChunker):
 from .base import BaseFormatter
 
 class MyFormatter(BaseFormatter):
-    def format(self, document: ProcessedDocument) -> str:
+    def format(self, document: ProcessedDocument) -> Any:
         # Implementation
 ```
 
