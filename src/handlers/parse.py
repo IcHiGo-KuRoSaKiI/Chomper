@@ -8,19 +8,21 @@ from typing import Any
 from mcp.types import ImageContent, TextContent
 
 from src.formatters.toon_formatter import TOONFormatter
+from src.server.cache import serialized_for
 from src.server.config import (
     DEFAULT_MAX_IMAGES,
     DEFAULT_OUTPUT_FORMAT,
     DEFAULT_SUMMARY_CHARS,
     OUTPUT_FORMAT_TOON,
 )
+from src.server.documents import load_document
 from src.server.helpers import (
     count_images_in_structure,
     detect_mime_type,
     extract_images_from_structure,
-    get_extractor_for_file,
     parse_from_base64,
     remove_image_placeholders,
+    run_blocking,
     validate_file_path,
 )
 
@@ -29,7 +31,21 @@ logger = logging.getLogger("chomper")
 
 async def handle_parse_document(arguments: dict[str, Any]) -> list[TextContent | ImageContent]:
     """
-    Handle parse_document tool call.
+    Handle parse_document tool call (extraction runs in a worker thread).
+
+    Returns:
+    - TextContent[0]: Plain extracted text (no JSON wrapping)
+    - TextContent[1]: Metadata as JSON (or TOON format if output_format=toon)
+    - ImageContent[]: Each image as separate ImageContent (if include_images=true)
+    """
+    return await run_blocking(parse_document_sync, arguments)
+
+
+def parse_document_sync(
+    arguments: dict[str, Any], *, use_cache: bool = True
+) -> list[TextContent | ImageContent]:
+    """
+    Blocking implementation of parse_document.
 
     Returns:
     - TextContent[0]: Plain extracted text (no JSON wrapping)
@@ -52,11 +68,8 @@ async def handle_parse_document(arguments: dict[str, Any]) -> list[TextContent |
 
     logger.info(f"Parsing document: {file_path} (full_text={full_text}, include_images={include_images})")
 
-    # Get extractor
-    extractor = get_extractor_for_file(file_path)
-
-    # Extract raw document
-    raw_doc = extractor.extract(str(file_path))
+    # Extract raw document (cached for unchanged files)
+    raw_doc = load_document(file_path, use_cache=use_cache)
 
     # Clean text by removing image placeholders
     clean_text = remove_image_placeholders(raw_doc.text)
@@ -135,7 +148,8 @@ async def handle_parse_document(arguments: dict[str, Any]) -> list[TextContent |
 
     # Add images if requested (same for both formats)
     if include_images:
-        images = extract_images_from_structure(raw_doc.structure, max_images=DEFAULT_MAX_IMAGES)
+        with serialized_for(file_path):  # PDF images are read with PyMuPDF
+            images = extract_images_from_structure(raw_doc.structure, max_images=DEFAULT_MAX_IMAGES)
 
         for idx, img in enumerate(images):
             page_num = img.get("page", 0)
@@ -192,8 +206,8 @@ async def handle_parse_document_bytes(arguments: dict[str, Any]) -> list[TextCon
     """
     Handle parse_document_bytes tool call for base64-encoded documents.
 
-    Decodes base64 content to a temp file, parses it using existing infrastructure,
-    then cleans up the temp file.
+    Decodes base64 content (capped at 100 MB) to a temp file, parses it in a worker
+    thread without caching, then removes the temp file.
 
     Args:
         arguments: Tool arguments including content_base64 and filename
@@ -204,43 +218,42 @@ async def handle_parse_document_bytes(arguments: dict[str, Any]) -> list[TextCon
     content_base64 = arguments.get("content_base64")
     filename = arguments.get("filename")
 
-    if not content_base64:
-        raise ValueError("content_base64 is required")
-    if not filename:
+    if not content_base64 or not isinstance(content_base64, str):
+        raise ValueError("content_base64 is required: the file's bytes, base64-encoded.")
+    if not filename or not isinstance(filename, str):
         raise ValueError("filename is required (e.g., 'document.pdf', 'data.xlsx')")
 
     logger.info(f"Parsing document from base64: {filename}")
+    return await run_blocking(_parse_bytes_sync, arguments, content_base64, filename)
 
-    # Create temp file from base64
+
+def _parse_bytes_sync(
+    arguments: dict[str, Any], content_base64: str, filename: str
+) -> list[TextContent | ImageContent]:
     temp_path, _ = parse_from_base64(content_base64, filename)
 
     try:
-        # Reuse existing parse logic by building modified arguments
         modified_args = {
             "file_path": str(temp_path),
             "full_text": arguments.get("full_text", False),
             "include_images": arguments.get("include_images", False),
             "output_format": arguments.get("output_format", DEFAULT_OUTPUT_FORMAT),
         }
+        # Temp files are never cached: the path is reused and the content is one-off.
+        result = parse_document_sync(modified_args, use_cache=False)
 
-        # Use existing handler
-        result = await handle_parse_document(modified_args)
-
-        # Update file_path in response to show original filename instead of temp path
-        # Handle both the temp path and any symlinked variants (e.g., /var vs /private/var on macOS)
+        # Show the original filename instead of the temp path (also the resolved
+        # variant, e.g. /var vs /private/var on macOS, and the bare temp name).
         temp_path_str = str(temp_path)
         temp_path_resolved = str(temp_path.resolve())
-        temp_filename = temp_path.name  # Just the filename like "tmpXXXXX.json"
+        temp_filename = temp_path.name
 
-        updated_result = []
+        updated_result: list[TextContent | ImageContent] = []
         for item in result:
             if isinstance(item, TextContent):
-                # Replace temp path with original filename in text
                 updated_text = item.text
-                # Replace full paths first (more specific)
                 updated_text = updated_text.replace(temp_path_resolved, filename)
                 updated_text = updated_text.replace(temp_path_str, filename)
-                # Replace just the temp filename (for TOON format which uses basename)
                 updated_text = updated_text.replace(temp_filename, filename)
                 updated_result.append(TextContent(type="text", text=updated_text))
             else:
@@ -249,6 +262,12 @@ async def handle_parse_document_bytes(arguments: dict[str, Any]) -> list[TextCon
         return updated_result
 
     finally:
-        # Always cleanup temp file
         temp_path.unlink(missing_ok=True)
         logger.debug(f"Cleaned up temp file: {temp_path}")
+
+
+__all__ = [
+    "handle_parse_document",
+    "handle_parse_document_bytes",
+    "parse_document_sync",
+]

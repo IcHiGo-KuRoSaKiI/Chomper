@@ -9,7 +9,7 @@ SDK, so the library stays light.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -138,6 +138,8 @@ class ChunkingOutcome:
 
     chunks: list[Any]
     raw_doc: Any | None
+    #: Facts about the source when extraction was skipped (e.g. ``page_count``).
+    document_info: dict[str, Any] = field(default_factory=dict)
 
 
 def chunk_document(
@@ -162,9 +164,13 @@ def chunk_document(
 
     chunks: list[Any] | None = None
     raw_doc: Any | None = None
+    info: dict[str, Any] = {}
     if hasattr(chunker, "chunk_path"):
         try:
             chunks = chunker.chunk_path(str(path), path.name)
+            result = getattr(chunker, "last_result", None)
+            if result is not None:
+                info["page_count"] = getattr(result, "page_count", None)
         except Exception as exc:  # any structural-parse failure falls back to extraction
             logger.warning("Structural parse of %s failed (%s); extracting instead.", path, exc)
         raw_doc = peek_document(path, extractor_class_for(path)) if use_cache else None
@@ -174,7 +180,7 @@ def chunk_document(
 
     if keywords:
         add_keywords(chunks)
-    return ChunkingOutcome(chunks=chunks, raw_doc=raw_doc)
+    return ChunkingOutcome(chunks=chunks, raw_doc=raw_doc, document_info=info)
 
 
 def section_name_of(chunk: Any) -> str | None:

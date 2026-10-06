@@ -7,13 +7,14 @@ from typing import Any
 
 from mcp.types import ImageContent, TextContent
 
-from src.extractors.image_utils import DEFAULT_MAX_DIMENSION
+from src.server.cache import serialized_for
 from src.server.config import DEFAULT_MAX_IMAGES
+from src.server.documents import load_document
 from src.server.helpers import (
     count_images_in_structure,
     detect_mime_type,
     extract_images_from_structure,
-    get_extractor_for_file,
+    run_blocking,
     validate_file_path,
 )
 
@@ -30,6 +31,12 @@ async def handle_get_document_images(arguments: dict[str, Any]) -> list[TextCont
     Returns:
         List of TextContent (position info) and ImageContent (actual images)
     """
+    return await run_blocking(_get_document_images_sync, arguments)
+
+
+def _get_document_images_sync(arguments: dict[str, Any]) -> list[TextContent | ImageContent]:
+    from src.extractors.image_utils import DEFAULT_MAX_DIMENSION
+
     file_path_str = arguments.get("file_path")
     page_filter = arguments.get("page")  # Optional, 1-indexed
     image_id = arguments.get("image_id")
@@ -48,11 +55,8 @@ async def handle_get_document_images(arguments: dict[str, Any]) -> list[TextCont
         f"(page={page_filter}, id={image_id}, max={max_images})"
     )
 
-    # Get extractor
-    extractor = get_extractor_for_file(file_path)
-
-    # Extract raw document
-    raw_doc = extractor.extract(str(file_path))
+    # Extract raw document (cached for unchanged files)
+    raw_doc = load_document(file_path)
 
     # Count without decoding anything; only returned images are encoded.
     total_images = count_images_in_structure(raw_doc.structure)
@@ -68,13 +72,14 @@ async def handle_get_document_images(arguments: dict[str, Any]) -> list[TextCont
             }, indent=2)
         )]
 
-    images = extract_images_from_structure(
-        raw_doc.structure,
-        page_filter=page_filter,
-        max_images=max_images,
-        max_dimension=max_dimension or None,
-        image_id=image_id,
-    )
+    with serialized_for(file_path):  # PDF images are read with PyMuPDF
+        images = extract_images_from_structure(
+            raw_doc.structure,
+            page_filter=page_filter,
+            max_images=max_images,
+            max_dimension=max_dimension or None,
+            image_id=image_id,
+        )
     if image_id is not None and not images:
         raise ValueError(f"No image with id '{image_id}' in {file_path.name}")
 

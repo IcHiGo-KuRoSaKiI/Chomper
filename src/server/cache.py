@@ -18,11 +18,12 @@ Cached values are shared between callers and must be treated as read-only.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import threading
 from collections import OrderedDict
-from collections.abc import Callable, Hashable
+from collections.abc import Callable, Hashable, Iterator
 from pathlib import Path
 from typing import Any, Generic, TypeVar
 
@@ -132,6 +133,24 @@ DOCUMENT_CACHE: LRUCache[tuple[Any, ...], Any] = LRUCache()
 STRUCTURE_CACHE: LRUCache[tuple[Any, ...], Any] = LRUCache()
 
 
+#: PyMuPDF (MuPDF) is not thread-safe, even across separate documents. Handlers run
+#: extraction in worker threads, so every PyMuPDF use -- PDF extraction, structural
+#: parsing and lazy PDF image loading -- is serialized on this lock.
+PYMUPDF_LOCK = threading.RLock()
+
+_PYMUPDF_SUFFIXES = {".pdf"}
+
+
+@contextlib.contextmanager
+def serialized_for(path: str | Path) -> Iterator[None]:
+    """Hold :data:`PYMUPDF_LOCK` while working on a file PyMuPDF will read."""
+    if Path(path).suffix.lower() in _PYMUPDF_SUFFIXES:
+        with PYMUPDF_LOCK:
+            yield
+    else:
+        yield
+
+
 def file_key(path: str | Path) -> tuple[str, int, int]:
     """``(resolved path, st_mtime_ns, st_size)`` identifying one version of a file."""
     resolved = Path(path).expanduser().resolve()
@@ -149,7 +168,8 @@ def cached_extract(
     """Extract ``path`` with ``extractor_cls(**options)``, through the document cache."""
 
     def load() -> Any:
-        return extractor_cls(**dict(options)).extract(str(path))
+        with serialized_for(path):
+            return extractor_cls(**dict(options)).extract(str(path))
 
     if not use_cache:
         return load()
@@ -170,11 +190,15 @@ def cached_parse_structure(path: str | Path, **options: Any) -> Any:
     """``pdf_structure.parse_structure(path, **options)`` through the structure cache."""
     from ..pdf_structure import parse_structure
 
+    def load() -> Any:
+        with PYMUPDF_LOCK:
+            return parse_structure(path, **options)
+
     try:
         key = (*file_key(path), tuple(sorted(options.items())))
     except OSError:
-        return parse_structure(path, **options)
-    return STRUCTURE_CACHE.get_or_load(key, lambda: parse_structure(path, **options))
+        return load()
+    return STRUCTURE_CACHE.get_or_load(key, load)
 
 
 def clear_caches() -> None:
@@ -188,6 +212,8 @@ __all__ = [
     "DOCUMENT_CACHE",
     "STRUCTURE_CACHE",
     "LRUCache",
+    "PYMUPDF_LOCK",
+    "serialized_for",
     "cache_size_from_env",
     "cached_extract",
     "cached_parse_structure",

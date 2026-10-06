@@ -1,25 +1,70 @@
 """
 Helper functions for Chomper MCP server.
+
+Nothing here imports an extractor (or ``src.extractors``) at module load, so the
+server starts without paying for PyMuPDF, pandas, trafilatura and friends.
 """
+from __future__ import annotations
+
+import asyncio
 import base64
+import binascii
 import json
 import re
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from mcp.types import TextContent
 
-from ..extractors.image_utils import (  # noqa: F401
-    DEFAULT_MAX_DIMENSION,
-    collect_images,
-    count_images,
-    detect_mime_type,
+from .config import EXTRACTORS, MAX_BYTES_INPUT, supported_extensions_hint
+from .documents import (
+    build_chunker,
+    extractor_class_for,
+    keywords_of,
+    section_name_of,
+    validate_path,
 )
-from .config import CHUNKERS, EXTRACTORS
+
+T = TypeVar("T")
+
+#: Sentinel meaning "use image_utils.DEFAULT_MAX_DIMENSION" without importing it here.
+_DEFAULT_DIMENSION = -1
 
 
-def validate_file_path(file_path: str) -> Path:
+async def run_blocking(func: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
+    """Run CPU-bound or blocking work (extraction, chunking) off the event loop."""
+    return await asyncio.to_thread(func, *args, **kwargs)
+
+
+def int_arg(
+    arguments: dict[str, Any],
+    name: str,
+    default: int | None,
+    *,
+    minimum: int | None = None,
+    maximum: int | None = None,
+    hint: str = "",
+) -> int | None:
+    """Read an integer tool argument, rejecting wrong types and out-of-range values.
+
+    Raises:
+        ValueError: naming the argument, the bad value and the accepted range.
+    """
+    value = arguments.get(name, default)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be an integer, got {value!r}.{(' ' + hint) if hint else ''}")
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{name} must be >= {minimum}, got {value}.{(' ' + hint) if hint else ''}")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"{name} must be <= {maximum}, got {value}.{(' ' + hint) if hint else ''}")
+    return value
+
+
+def validate_file_path(file_path: str | None) -> Path:
     """
     Validate and return absolute path.
 
@@ -32,18 +77,33 @@ def validate_file_path(file_path: str) -> Path:
     Raises:
         ValueError: If path is invalid or file does not exist
     """
-    if not file_path:
-        raise ValueError("File path is required")
+    return validate_path(file_path)
 
-    path = Path(file_path).expanduser().resolve()
 
-    if not path.exists():
-        raise ValueError(f"File not found: {path}")
+def decode_base64_content(content_base64: str) -> bytes:
+    """Decode base64 tool input, enforcing the size cap before and after decoding.
 
-    if not path.is_file():
-        raise ValueError(f"Not a file: {path}")
-
-    return path
+    Raises:
+        ValueError: invalid base64, or larger than ``MAX_BYTES_INPUT``.
+    """
+    limit_mb = MAX_BYTES_INPUT // (1024 * 1024)
+    if len(content_base64) > MAX_BYTES_INPUT * 4 // 3 + 4:
+        raise ValueError(
+            f"content_base64 is larger than the {limit_mb} MB limit. "
+            "Save the file to disk and call parse_document with its path instead."
+        )
+    try:
+        content = base64.b64decode(content_base64, validate=True)
+    except (binascii.Error, ValueError) as e:
+        raise ValueError(
+            f"Invalid base64 content: {e}. Send standard base64 (RFC 4648) without line breaks."
+        ) from e
+    if len(content) > MAX_BYTES_INPUT:
+        raise ValueError(
+            f"Decoded content is {len(content)} bytes, over the {limit_mb} MB limit. "
+            "Save the file to disk and call parse_document with its path instead."
+        )
+    return content
 
 
 def parse_from_base64(content_base64: str, filename: str) -> tuple[Path, None]:
@@ -58,39 +118,30 @@ def parse_from_base64(content_base64: str, filename: str) -> tuple[Path, None]:
         Tuple of (temp_file_path, None) - second element reserved for future cleanup callback
 
     Raises:
-        ValueError: If filename has no extension or base64 content is invalid
+        ValueError: If filename has no extension, the format is unsupported, or the
+            content is invalid or too large
     """
-    # Get extension from filename
     ext = Path(filename).suffix.lower()
     if not ext:
         raise ValueError(
             "filename must have an extension for format detection (e.g., 'document.pdf', 'data.xlsx')"
         )
-
-    # Validate extension is supported
     if ext not in EXTRACTORS:
+        reason = EXTRACTORS.unavailable_reason(ext)
+        if ext in EXTRACTORS.known() and reason:
+            raise ValueError(reason)
         raise ValueError(
-            f"Unsupported file format: {ext}. "
-            f"Supported formats: {', '.join(sorted(EXTRACTORS.keys()))}"
+            f"Unsupported file format: {ext}. Supported formats: {supported_extensions_hint()}"
         )
 
-    # Decode base64
-    try:
-        content_bytes = base64.b64decode(content_base64)
-    except Exception as e:
-        raise ValueError(f"Invalid base64 content: {e}") from e
+    content_bytes = decode_base64_content(content_base64)
 
-    # Write to temp file with correct extension
-    temp_file = tempfile.NamedTemporaryFile(
-        suffix=ext,
-        delete=False
-    )
+    temp_file = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
     try:
         temp_file.write(content_bytes)
         temp_file.close()
         return Path(temp_file.name), None
-    except Exception as e:
-        # Cleanup on error
+    except OSError as e:
         temp_file.close()
         Path(temp_file.name).unlink(missing_ok=True)
         raise ValueError(f"Failed to write temp file: {e}") from e
@@ -109,47 +160,33 @@ def get_extractor_for_file(file_path: Path) -> Any:
     Raises:
         ValueError: If file type is not supported
     """
-    extension = file_path.suffix.lower()
-
-    if extension not in EXTRACTORS:
-        raise ValueError(
-            f"Unsupported file format: {extension}. "
-            f"Supported formats: {', '.join(sorted(EXTRACTORS.keys()))}"
-        )
-
-    return EXTRACTORS[extension]()
+    return extractor_class_for(file_path)()
 
 
 def get_chunker_for_file(
     file_path: Path,
-    target_size: int = 300,
-    overlap: int = 50
+    target_size: int = 1000,
+    overlap: int = 100
 ) -> Any:
     """
-    Get appropriate chunker for file type.
+    Get the format-aware ("auto") chunker for a file, as the library and CLI do.
 
     Args:
         file_path: Path to file
-        target_size: Target words per chunk
+        target_size: Maximum words per chunk
         overlap: Words to overlap
 
     Returns:
         Chunker instance
     """
-    extension = file_path.suffix.lower()
-
-    if extension not in CHUNKERS:
-        raise ValueError(f"No chunker available for: {extension}")
-
-    chunker_class = CHUNKERS[extension]
-    return chunker_class(target_size=target_size, overlap=overlap)
+    return build_chunker(file_path.suffix.lower(), "auto", target_size, overlap)
 
 
 def extract_images_from_structure(
     structure: dict[str, Any] | None,
     page_filter: int | None = None,
     max_images: int | None = None,
-    max_dimension: int | None = DEFAULT_MAX_DIMENSION,
+    max_dimension: int | None = _DEFAULT_DIMENSION,
     image_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """
@@ -161,6 +198,7 @@ def extract_images_from_structure(
         page_filter: If set, only return images from this page/slide (1-indexed)
         max_images: Maximum number of images to return
         max_dimension: Downscale so the long edge is at most this; 0 keeps full size
+            (default: ``image_utils.DEFAULT_MAX_DIMENSION``)
         image_id: Only the image whose marker in the text is ``![...](image:<id>)``
 
     Returns:
@@ -168,6 +206,10 @@ def extract_images_from_structure(
         width, height, position. Identical images (a logo on every page) are
         returned once, with ``pages`` listing every page they appear on.
     """
+    from ..extractors.image_utils import DEFAULT_MAX_DIMENSION, collect_images
+
+    if max_dimension == _DEFAULT_DIMENSION:
+        max_dimension = DEFAULT_MAX_DIMENSION
     return [
         {
             "id": img.get("id"),
@@ -194,7 +236,16 @@ def extract_images_from_structure(
 
 def count_images_in_structure(structure: dict[str, Any] | None, page_filter: int | None = None) -> int:
     """Number of (de-duplicated) images, without decoding any of them."""
+    from ..extractors.image_utils import count_images
+
     return count_images(structure, page_filter=page_filter)
+
+
+def detect_mime_type(data: str) -> str:
+    """MIME type of base64 image data (see ``image_utils.detect_mime_type``)."""
+    from ..extractors.image_utils import detect_mime_type as _detect
+
+    return _detect(data)
 
 
 def remove_image_placeholders(text: str) -> str:
@@ -209,7 +260,8 @@ def remove_image_placeholders(text: str) -> str:
 
 def format_error_response(error: Exception) -> list[TextContent]:
     """
-    Format error response as TextContent list.
+    Format error response as TextContent list (legacy shape; tool failures are now
+    reported with ``isError=True`` by the server, see ``server.dispatch_tool``).
 
     Args:
         error: Exception that occurred
@@ -233,16 +285,18 @@ def chunk_to_dict(chunk: Any) -> dict[str, Any]:
         chunk: Chunk object
 
     Returns:
-        Dictionary representation
+        Dictionary representation (``section_name`` and ``keywords`` are read from
+        wherever the chunker recorded them, including ``chunk.metadata``)
     """
+    metadata = dict(getattr(chunk, "metadata", None) or {})
     return {
         "chunk_id": chunk.chunk_id,
         "text": chunk.text,
         "start_char": chunk.start_char,
         "end_char": chunk.end_char,
         "word_count": chunk.word_count,
-        "metadata": chunk.metadata,
-        "keywords": getattr(chunk, "keywords", []),
-        "section_name": getattr(chunk, "section_name", None),
-        "section_type": getattr(chunk, "section_type", "text"),
+        "metadata": metadata,
+        "keywords": keywords_of(chunk),
+        "section_name": section_name_of(chunk),
+        "section_type": getattr(chunk, "section_type", None) or metadata.get("section_type", "text"),
     }

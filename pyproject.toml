@@ -71,7 +71,7 @@ minimal = [
 ]
 
 [project.scripts]
-chomper = "server:main"
+chomper = "server:run"
 chomper-parse = "cli:main"
 
 [project.urls]

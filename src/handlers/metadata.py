@@ -10,13 +10,14 @@ from mcp.types import TextContent
 from src.formatters.toon_formatter import TOONFormatter
 from src.server.config import (
     DEFAULT_OUTPUT_FORMAT,
-    EXTRACTORS,
     FORMAT_DESCRIPTIONS,
     OUTPUT_FORMAT_TOON,
+    describe_formats,
 )
+from src.server.documents import load_document
 from src.server.helpers import (
     count_images_in_structure,
-    get_extractor_for_file,
+    run_blocking,
     validate_file_path,
 )
 
@@ -33,6 +34,10 @@ async def handle_extract_metadata(arguments: dict[str, Any]) -> list[TextContent
     Returns:
         List with TextContent containing document metadata as JSON or TOON
     """
+    return await run_blocking(_extract_metadata_sync, arguments)
+
+
+def _extract_metadata_sync(arguments: dict[str, Any]) -> list[TextContent]:
     file_path_str = arguments.get("file_path")
     output_format = arguments.get("output_format", DEFAULT_OUTPUT_FORMAT)
 
@@ -41,11 +46,8 @@ async def handle_extract_metadata(arguments: dict[str, Any]) -> list[TextContent
 
     logger.info(f"Extracting metadata: {file_path}")
 
-    # Get extractor
-    extractor = get_extractor_for_file(file_path)
-
-    # Extract raw document (we only need metadata)
-    raw_doc = extractor.extract(str(file_path))
+    # Extract raw document (cached: free after parse_document on the same file)
+    raw_doc = load_document(file_path)
 
     # Get format-specific info
     extension = file_path.suffix.lower()
@@ -95,17 +97,8 @@ async def handle_list_supported_formats(_arguments: dict[str, Any]) -> list[Text
     Returns:
         List with TextContent containing supported formats as JSON
     """
-    # Build format list with availability status
-    formats = []
-
-    for ext, description in sorted(FORMAT_DESCRIPTIONS.items()):
-        is_available = ext in EXTRACTORS
-        formats.append({
-            "extension": ext,
-            "description": description,
-            "available": is_available,
-            "reason": None if is_available else "Required dependencies not installed"
-        })
+    # Availability resolves each extractor (importing it), so do it off the loop.
+    formats = await run_blocking(describe_formats)
 
     # Group by category
     categories = {
@@ -125,7 +118,7 @@ async def handle_list_supported_formats(_arguments: dict[str, Any]) -> list[Text
     result = {
         "success": True,
         "total_formats": len(FORMAT_DESCRIPTIONS),
-        "available_formats": len(EXTRACTORS),
+        "available_formats": sum(1 for f in formats if f["available"]),
         "formats": formats,
         "by_category": categorized
     }
