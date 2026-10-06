@@ -7,37 +7,27 @@ Extraction → Chunking → Enrichment → Formatting
 from pathlib import Path
 from typing import Any
 
-from .chunking.strategies import (
-    CodeChunker,
-    DOCXChunker,
-    ExcelChunker,
-    HTMLChunker,
-    MarkdownChunker,
-    PDFChunker,
-    PPTXChunker,
-    TextChunker,
-)
 from .enrichment import KeywordExtractor, MetadataEnricher, SectionDetector, TitleGenerator
-from .extractors import (
-    CodeExtractor,
-    CSVExtractor,
-    DOCXExtractor,
-    ExcelExtractor,
-    HTMLExtractor,
-    MarkdownExtractor,
-    PDFExtractor,
-    PPTXExtractor,
-    TextExtractor,
-)
 from .formatters import SimpleFormatter
 from .models.document import Chunk, EnrichedChunk, ProcessedDocument
+from .server.config import (
+    CHUNKERS,
+    DEFAULT_CHUNK_OVERLAP,
+    DEFAULT_CHUNK_SIZE,
+    DEFAULT_CHUNK_STRATEGY,
+    EXTRACTORS,
+)
+from .server.documents import build_chunker, load_document, validate_path
 
 
 class DocumentPipeline:
     """
     Main document processing pipeline.
 
-    Orchestrates the complete workflow from file to formatted output.
+    Orchestrates the complete workflow from file to formatted output. Extraction
+    and chunking go through the same registry, document cache and chunker
+    factory as ``chomper.chunk()``, the CLI and the MCP server, so the pipeline
+    cannot drift from them; only enrichment and formatting are its own.
 
     Usage:
         pipeline = DocumentPipeline()
@@ -50,109 +40,19 @@ class DocumentPipeline:
         )
     """
 
-    # Build format mappings dynamically (only include available extractors)
-    @staticmethod
-    def _build_extractors():
-        """Build extractor mapping with only available extractors."""
-        extractors = {}
-
-        # Always available (no heavy dependencies)
-        extractors.update({
-            '.py': CodeExtractor,
-            '.js': CodeExtractor,
-            '.jsx': CodeExtractor,
-            '.ts': CodeExtractor,
-            '.tsx': CodeExtractor,
-            '.java': CodeExtractor,
-            '.cpp': CodeExtractor,
-            '.c': CodeExtractor,
-            '.go': CodeExtractor,
-            '.rs': CodeExtractor,
-            '.txt': TextExtractor,
-            '.text': TextExtractor,
-            '.log': TextExtractor,
-            '.md': MarkdownExtractor,
-            '.markdown': MarkdownExtractor
-        })
-
-        # Optional (require heavy dependencies)
-        if PDFExtractor is not None:
-            extractors['.pdf'] = PDFExtractor
-        if DOCXExtractor is not None:
-            extractors['.docx'] = DOCXExtractor
-            extractors['.doc'] = DOCXExtractor
-        if PPTXExtractor is not None:
-            extractors['.pptx'] = PPTXExtractor
-            extractors['.ppt'] = PPTXExtractor
-        if ExcelExtractor is not None:
-            extractors['.xlsx'] = ExcelExtractor
-            extractors['.xlsm'] = ExcelExtractor
-            extractors['.xltx'] = ExcelExtractor
-            extractors['.xltm'] = ExcelExtractor
-        if CSVExtractor is not None:
-            extractors['.csv'] = CSVExtractor
-            extractors['.tsv'] = CSVExtractor
-        if HTMLExtractor is not None:
-            extractors['.html'] = HTMLExtractor
-            extractors['.htm'] = HTMLExtractor
-
-        return extractors
-
-    @staticmethod
-    def _build_chunkers():
-        """Build chunker mapping with only available chunkers."""
-        chunkers = {}
-
-        # Always available
-        chunkers.update({
-            '.py': CodeChunker,
-            '.js': CodeChunker,
-            '.jsx': CodeChunker,
-            '.ts': CodeChunker,
-            '.tsx': CodeChunker,
-            '.java': CodeChunker,
-            '.cpp': CodeChunker,
-            '.c': CodeChunker,
-            '.go': CodeChunker,
-            '.rs': CodeChunker,
-            '.txt': TextChunker,
-            '.text': TextChunker,
-            '.log': TextChunker,
-            '.md': MarkdownChunker,
-            '.markdown': MarkdownChunker
-        })
-
-        # Optional
-        if PDFExtractor is not None:
-            chunkers['.pdf'] = PDFChunker
-        if DOCXExtractor is not None:
-            chunkers['.docx'] = DOCXChunker
-            chunkers['.doc'] = DOCXChunker
-        if PPTXExtractor is not None:
-            chunkers['.pptx'] = PPTXChunker
-            chunkers['.ppt'] = PPTXChunker
-        if ExcelExtractor is not None:
-            chunkers['.xlsx'] = ExcelChunker
-            chunkers['.xlsm'] = ExcelChunker
-            chunkers['.xltx'] = ExcelChunker
-            chunkers['.xltm'] = ExcelChunker
-        if CSVExtractor is not None:
-            chunkers['.csv'] = ExcelChunker  # Use ExcelChunker for CSV too
-            chunkers['.tsv'] = ExcelChunker
-        if HTMLExtractor is not None:
-            chunkers['.html'] = HTMLChunker
-            chunkers['.htm'] = HTMLChunker
-
-        return chunkers
-
-    EXTRACTORS = None  # Will be built on first use
-    CHUNKERS = None  # Will be built on first use
+    #: Shared, lazily resolved registries (see ``src.server.config``).
+    EXTRACTORS = EXTRACTORS
+    CHUNKERS = CHUNKERS
 
     def __init__(
         self,
         enrichers: list[Any] | None = None,
         formatter: Any | None = None,
-        skip_enrichment_for_code: bool = True
+        skip_enrichment_for_code: bool = True,
+        *,
+        strategy: str = DEFAULT_CHUNK_STRATEGY,
+        chunk_size: int = DEFAULT_CHUNK_SIZE,
+        overlap: int = DEFAULT_CHUNK_OVERLAP,
     ):
         """
         Initialize pipeline.
@@ -161,6 +61,9 @@ class DocumentPipeline:
             enrichers: List of enricher instances (default: all enrichers)
             formatter: Formatter instance (default: SimpleFormatter)
             skip_enrichment_for_code: Skip enrichment for code files (default: True)
+            strategy: Chunking strategy, as in ``chomper.chunk`` (default: auto)
+            chunk_size: Maximum words per chunk (default: 1000)
+            overlap: Words to overlap between chunks (default: 100)
         """
         # Default enrichers
         if enrichers is None:
@@ -178,12 +81,9 @@ class DocumentPipeline:
         self.enrichers = enrichers
         self.formatter = formatter
         self.skip_enrichment_for_code = skip_enrichment_for_code
-
-        # Build extractors/chunkers on first use
-        if DocumentPipeline.EXTRACTORS is None:
-            DocumentPipeline.EXTRACTORS = DocumentPipeline._build_extractors()
-        if DocumentPipeline.CHUNKERS is None:
-            DocumentPipeline.CHUNKERS = DocumentPipeline._build_chunkers()
+        self.strategy = strategy
+        self.chunk_size = chunk_size
+        self.overlap = overlap
 
     def process(self, file_path: str, doc_id: str | None = None) -> Any:
         """
@@ -196,20 +96,14 @@ class DocumentPipeline:
         Returns:
             Formatted output (depends on formatter)
         """
-        # Detect format
-        extension = Path(file_path).suffix.lower()
+        path = validate_path(file_path)
+        extension = path.suffix.lower()
 
-        if extension not in self.EXTRACTORS:
-            raise ValueError(f"Unsupported file format: {extension}")
+        # Step 1: Extract (shared cache; raises ValueError for unsupported formats)
+        raw_doc = load_document(path)
 
-        # Step 1: Extract
-        extractor_class = self.EXTRACTORS[extension]
-        extractor = extractor_class()
-        raw_doc = extractor.extract(file_path)
-
-        # Step 2: Chunk
-        chunker_class = self.CHUNKERS[extension]
-        chunker = chunker_class()
+        # Step 2: Chunk (shared factory and defaults)
+        chunker = build_chunker(extension, self.strategy, self.chunk_size, self.overlap)
         chunks = chunker.chunk(raw_doc)
 
         # Step 3: Enrich (skip for code, structured data, and HTML if configured)
