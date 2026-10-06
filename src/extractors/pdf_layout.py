@@ -31,6 +31,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..pdf_structure.cell_marks import recover_cell_marks
 from ..pdf_structure.figures import CAPTION_RE, Caption, find_caption, share_captions
 from ..pdf_structure.lists import list_indent_hints, normalize_markdown_lists
 from .image_utils import image_marker, image_record
@@ -52,6 +53,7 @@ _PAGE_NUMBER = re.compile(r"^\W*(?:page\s*)?\d{1,4}(?:\s*(?:of|/)\s*\d{1,4})?\W*
 _PICTURE_TEXT = re.compile(r"<!--\s*Start of picture text\s*-->(.*?)<!--\s*End of picture text\s*-->", re.S)
 _BOLD_HEADING = re.compile(r"^(#{1,6})[ \t]+\*\*(.+?)\*\*[ \t]*$", re.M)
 # OCR reads bullet glyphs as stray characters after the list marker.
+_OCR_JUNK_HEADING = re.compile(r"^#{1,6}[ \t]+\W*\w?\W*[ \t]*$\n?", re.M)
 _OCR_BULLET = re.compile(r"^(\s*-\s)[+oO°*•·©¢e»>]\s+(?=\S)", re.M)
 
 
@@ -173,6 +175,7 @@ def extract_with_layout(
     table_format: str = "markdown",
     figure_text: bool = True,
     vector_figures: bool = True,
+    recover_marks: bool = True,
 ) -> LayoutResult:
     """
     Run the layout model over ``pdf_document`` and build per-page Markdown and
@@ -189,6 +192,8 @@ def extract_with_layout(
         figure_text: Keep word-like text read inside figures (diagram labels).
         vector_figures: Treat picture regions with no embedded image behind them
             (vector charts, diagrams) as figures.
+        recover_marks: Restore ✓/✗/● in table cells from symbol fonts, vector
+            strokes and tiny icons (Markdown tables only).
     """
     assert _layout is not None, "pymupdf-layout is not installed"
     # Before parsing: OCR writes recognised text into the page objects, after
@@ -222,7 +227,9 @@ def extract_with_layout(
     repeated = {k for k, on in pages_per_key.items() if len(on) >= 3 and len(on) > 0.5 * page_count}
 
     table_markdown = (
-        _render_tables(parsed, chunks, pdf_document) if table_format == "markdown" else {}
+        _render_tables(parsed, chunks, pdf_document, recover_marks)
+        if table_format == "markdown"
+        else {}
     )
 
     result = LayoutResult(pages=[])
@@ -360,6 +367,8 @@ def extract_with_layout(
                 (result.ocr_pages if ocr_text else result.pages_without_text).append(index + 1)
             if ocr_text:
                 text = _OCR_BULLET.sub(r"\1", text)
+                # Logos and stamps OCR into one-letter "headings" ("# a").
+                text = _OCR_JUNK_HEADING.sub("", text)
 
         text = normalize_markdown_lists(_tidy(text), list_indent_hints(lines))
         result.pages.append(LayoutPage(text=text.strip("\n") + "\n", figures=figures))
@@ -380,14 +389,21 @@ def _column_span(table: dict[str, Any], box: dict[str, Any]) -> tuple[float, flo
     return (min(starts), y0, max(starts), y1)
 
 
-def _render_tables(parsed: Any, chunks: list[dict[str, Any]], pdf_document: Any) -> dict[tuple[int, int], str]:
+def _render_tables(
+    parsed: Any,
+    chunks: list[dict[str, Any]],
+    pdf_document: Any,
+    recover_marks: bool = True,
+) -> dict[tuple[int, int], str]:
     """
     Markdown for every table region, keyed by ``(page index, box index)``.
 
     Rendered from the model's cell grid rather than taken from its Markdown,
     which leaves ``|`` inside cells unescaped (splitting the column) and reads
     cell borders as strikethrough. A table continuing on the next page gets its
-    header row back, as the structural chunker does.
+    header row back, as the structural chunker does. With ``recover_marks``,
+    check marks and crosses that extract as symbol-font junk or not at all are
+    restored (see :mod:`src.pdf_structure.cell_marks`).
     """
     from ..pdf_structure.tables import TableRegion, inherit_continuation_headers
 
@@ -403,6 +419,9 @@ def _render_tables(parsed: Any, chunks: list[dict[str, Any]], pdf_document: Any)
             grid = table.get("extract") or []
             if not grid:
                 continue
+            cells = table.get("cells") or []
+            if recover_marks and len(cells) == len(grid):
+                grid = recover_cell_marks(pdf_document[page_index], cells, grid)
             rows = tuple(tuple("" if c is None else str(c) for c in row) for row in grid)
             columns = max(len(row) for row in rows)
             regions.append((
