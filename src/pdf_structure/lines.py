@@ -11,7 +11,6 @@ Everything downstream in :mod:`src.pdf_structure` works from :class:`PageLine`.
 from __future__ import annotations
 
 import re
-
 from dataclasses import dataclass
 from typing import Any
 
@@ -106,7 +105,9 @@ def extract_lines(pdf_document: Any) -> list[PageLine]:
     for page_index in range(len(pdf_document)):
         page = pdf_document[page_index]
         height = float(page.rect.height) or 1.0
-        raw = page.get_text("dict")
+        # Expand ligatures (U+FB01 "ﬁ", U+FB02 "ﬂ") into plain letters, or
+        # "ﬂat" never matches a search for "flat".
+        raw = page.get_text("dict", flags=fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_LIGATURES)
 
         for block in raw.get("blocks", []):
             for line in block.get("lines", []):

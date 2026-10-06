@@ -18,11 +18,11 @@ of 15 chunks ending mid-sentence in measurement.
 from __future__ import annotations
 
 import re
-
 from dataclasses import dataclass, field
 
 from .headings import HeadingSpan, heading_path, parent_heading_id
 from .lines import PageLine
+from .lists import render_list_lines
 from .math_regions import MathRegion
 from .sentences import (
     ends_mid_sentence,
@@ -134,11 +134,13 @@ class _Unit:
             return "\n".join(l.text for l in self.lines)
 
         parts: list[str] = []
-        run: list[str] = []
+        run: list[PageLine] = []
 
         def flush() -> None:
             if run:
-                parts.append(reflow("\n".join(run)))
+                # List items first (they carry their indentation), then undo soft
+                # wrapping for whatever prose remains.
+                parts.append(reflow("\n".join(render_list_lines(run))))
                 run.clear()
 
         for line in self.lines:
@@ -146,7 +148,7 @@ class _Unit:
                 flush()
                 parts.append(line.text)
             else:
-                run.append(line.text)
+                run.append(line)
         flush()
 
         return "\n\n".join(p for p in parts if p.strip())
@@ -220,6 +222,21 @@ def _build_units(
     return units
 
 
+#: A rendered Markdown list item (see :mod:`.lists`).
+_LIST_LINE = re.compile(r"^\s*(?:[-*+]|\d{1,3}[.)])\s+\S")
+
+
+def _join_units(units: list[str]) -> str:
+    """Join sentences with spaces, but keep list items on their own lines."""
+    out = units[0] if units else ""
+    for previous, unit in zip(units, units[1:], strict=False):
+        if _LIST_LINE.match(unit) or _LIST_LINE.match(previous.rsplit("\n", 1)[-1]):
+            out += "\n" + unit
+        else:
+            out += " " + unit
+    return out
+
+
 #: Characters that close a sentence, allowing trailing quotes or brackets.
 _SENTENCE_END = re.compile(r"[.!?:;][\"'”’)\]]*\s*$")
 
@@ -240,9 +257,15 @@ def _subdivide(text: str, max_words: int) -> list[str]:
     """
     paragraphs = split_paragraphs(reflow(text)) or [text]
 
-    # Flatten to (sentence, ends_paragraph) preserving order.
+    # Flatten to (sentence, ends_paragraph) preserving order. A list item is its
+    # own unit: sentence-splitting a list block would glue its items together.
     items: list[tuple[str, bool]] = []
     for paragraph in paragraphs:
+        rows = paragraph.split("\n")
+        if any(_LIST_LINE.match(row) for row in rows):
+            for index, row in enumerate(rows):
+                items.append((row, index == len(rows) - 1))
+            continue
         sentences = split_sentences(paragraph, do_reflow=False) or [paragraph]
         for index, sentence in enumerate(sentences):
             items.append((sentence, index == len(sentences) - 1))
@@ -283,18 +306,18 @@ def _subdivide(text: str, max_words: int) -> list[str]:
             continue
 
         if buffer and words + count > max_words:
-            pieces.append(" ".join(buffer))
+            pieces.append(_join_units(buffer))
             buffer, words = [], 0
 
         buffer.append(sentence)
         words += count
 
         if ends_paragraph and words >= tail_window:
-            pieces.append(" ".join(buffer))
+            pieces.append(_join_units(buffer))
             buffer, words = [], 0
 
     if buffer:
-        pieces.append(" ".join(buffer))
+        pieces.append(_join_units(buffer))
 
     return [p.strip() for p in pieces if p.strip()]
 
