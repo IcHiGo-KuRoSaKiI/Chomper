@@ -1,13 +1,24 @@
 """
-HTML extractor using BeautifulSoup4 and Trafilatura.
+HTML extractor: one BeautifulSoup parse, Markdown out.
 
-Extracts text, tables, lists, forms, links, and metadata from HTML files and web pages.
-Handles boilerplate removal, article extraction, and semantic structure detection.
+The page is parsed once (``lxml``; the encoding comes from the BOM or
+``<meta charset>``). Metadata and the structural elements the HTML chunker uses
+(tables, lists, forms, links, semantic sections) are read from that tree, then
+boilerplate is stripped and the main content is converted to Markdown by
+``html_markdown.HTMLToMarkdown``: headings, nested and numbered lists, GFM
+tables with spans, fenced code with indentation, links and images.
+
+Trafilatura is no longer used for the text. Measured on a saved Wikipedia
+article, its Markdown mode glued 361 links to the following word, kept 17 of
+373 list items, lost list nesting and code indentation and took 0.42 s against
+0.12 s; on a short page it duplicated paragraphs and flattened an ``<ol>``.
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -16,12 +27,6 @@ try:
     BS4_AVAILABLE = True
 except ImportError:
     BS4_AVAILABLE = False
-
-try:
-    from trafilatura import extract, extract_metadata
-    TRAFILATURA_AVAILABLE = True
-except ImportError:
-    TRAFILATURA_AVAILABLE = False
 
 from ..models.document import RawDocument
 from ..models.html_models import (
@@ -35,22 +40,51 @@ from ..models.html_models import (
 )
 from .base import BaseExtractor
 
+if BS4_AVAILABLE:
+    from .html_markdown import (
+        HTMLToMarkdown,
+        attr_text,
+        body_of,
+        find_tag,
+        main_content,
+        parse_html,
+        strip_boilerplate,
+    )
+
 logger = logging.getLogger(__name__)
+
+_DATE_META = (
+    ("property", "article:published_time"),
+    ("name", "article:published_time"),
+    ("itemprop", "datePublished"),
+    ("name", "date"),
+    ("name", "pubdate"),
+    ("name", "publishdate"),
+    ("name", "dc.date.issued"),
+    ("name", "dc.date"),
+    ("property", "og:published_time"),
+)
+
+
+def _parse_date(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 class HTMLExtractor(BaseExtractor):
     """
-    Extract content from HTML files and web pages.
+    Extract content from HTML files and web pages as Markdown.
 
     Features:
-    - Boilerplate removal (ads, navigation, footer, etc.)
-    - Article extraction with Trafilatura
-    - Table extraction (preserves structure)
-    - List extraction (ordered/unordered)
-    - Form detection
-    - Link extraction and classification
-    - Metadata extraction (meta tags, Open Graph, Schema.org)
-    - Semantic section detection (article, section, nav, etc.)
+    - Boilerplate removal (scripts, navigation, headers/footers, sidebars, ads)
+    - Main-content selection (``main``, ``[role=main]``, a single ``article``)
+    - Markdown with nested/numbered lists, GFM tables, fenced code and links
+    - Structural extraction for the chunker (tables, lists, forms, links, sections)
+    - Metadata (title, meta tags, Open Graph, JSON-LD, publish date)
     """
 
     SUPPORTED_EXTENSIONS = ['.html', '.htm']
@@ -96,217 +130,141 @@ class HTMLExtractor(BaseExtractor):
 
     def extract(self, file_path: str) -> RawDocument:
         """
-        Extract content from HTML file.
+        Extract content from an HTML file as Markdown.
 
         Args:
             file_path: Path to HTML file
 
         Returns:
-            RawDocument with extracted content and structure
+            RawDocument with Markdown text, metadata and structure
         """
         self.validate_file(file_path)
+        soup = parse_html(Path(file_path).read_bytes())
 
-        # Read HTML content
-        with open(file_path, encoding='utf-8', errors='ignore') as f:
-            html_content = f.read()
-
-        # Parse with BeautifulSoup
-        soup = BeautifulSoup(html_content, 'lxml')
-
-        # Create HTML document structure
         html_doc = HTMLDocument()
-
-        # Extract metadata
         if self.extract_metadata_flag:
-            html_doc.metadata = self._extract_metadata(soup, html_content)
+            html_doc.metadata = self._extract_metadata(soup)
 
-        # Extract main content (with boilerplate removal if enabled)
-        html_doc.main_content = self._extract_main_content(html_content, soup)
-        html_doc.full_text = self._get_full_text(soup)
-
-        # Extract structural elements
+        # Structure for the HTML chunker, read before boilerplate is stripped.
         if self.extract_tables:
             html_doc.tables = self._extract_tables(soup)
-
         if self.extract_lists:
             html_doc.lists = self._extract_lists(soup)
-
         if self.extract_forms:
             html_doc.forms = self._extract_forms(soup)
-
         if self.extract_links:
             html_doc.links = self._extract_links(soup)
-
-        # Extract semantic sections
         if self.preserve_structure:
             html_doc.sections = self._extract_sections(soup)
+        html_doc.has_article = soup.find("article") is not None
+        html_doc.has_nav = soup.find("nav") is not None
+        html_doc.num_headings = len(soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6"]))
 
-        # Detect document structure
-        html_doc.has_article = soup.find('article') is not None
-        html_doc.has_nav = soup.find('nav') is not None
-        html_doc.num_headings = len(soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']))
+        base_url = self.base_url or attr_text(find_tag(soup, "base", href=True), "href")
+        strip_boilerplate(soup, chrome=False)  # scripts, styles, hidden elements
+        html_doc.full_text = soup.get_text(separator="\n", strip=True)
+        if self.remove_boilerplate:
+            strip_boilerplate(soup, chrome=True)  # navigation, sidebars, footers
+        converter = HTMLToMarkdown(base_url=base_url)
+        body = body_of(soup)
+        root = main_content(soup) if self.remove_boilerplate else body
+        text = converter.convert(root)
+        if not text and root is not body:
+            text = converter.convert(body)
+        title = html_doc.metadata.title
+        if title and not any(line.startswith("# ") for line in text.splitlines()):
+            text = f"# {' '.join(title.split())}\n\n{text}".strip()
+        html_doc.main_content = text
 
-        # Combine main content with extracted text
-        if not html_doc.main_content:
-            html_doc.main_content = html_doc.full_text
-
-        # Get basic metadata
         metadata = self._get_basic_metadata(file_path)
         metadata.update(self._convert_html_metadata_to_dict(html_doc))
+        if soup.original_encoding:
+            metadata["encoding"] = soup.original_encoding
 
         return RawDocument(
-            text=html_doc.main_content,
+            text=text,
             metadata=metadata,
             structure={
-                'html_document': html_doc,
-                'tables': html_doc.tables,
-                'lists': html_doc.lists,
-                'forms': html_doc.forms,
-                'links': html_doc.links,
-                'sections': html_doc.sections
-            }
+                "html_document": html_doc,
+                "tables": html_doc.tables,
+                "lists": html_doc.lists,
+                "forms": html_doc.forms,
+                "links": html_doc.links,
+                "sections": html_doc.sections,
+                "images": converter.images,
+            },
         )
 
-    def _extract_metadata(self, soup: BeautifulSoup, html_content: str) -> HTMLMetadata:
+    def _extract_metadata(self, soup: BeautifulSoup) -> HTMLMetadata:
         """
-        Extract metadata from HTML meta tags and structured data.
+        Metadata from ``<title>``, meta tags, Open Graph and JSON-LD.
 
-        Args:
-            soup: BeautifulSoup object
-            html_content: Raw HTML content
-
-        Returns:
-            HTMLMetadata object
+        Read from the already-parsed tree (no second parse).
         """
         metadata = HTMLMetadata()
-
-        # Extract title
-        title_tag = soup.find('title')
+        title_tag = soup.find("title")
         if title_tag:
             metadata.title = title_tag.get_text().strip()
 
-        # Try Trafilatura metadata extraction if available
-        if TRAFILATURA_AVAILABLE:
-            try:
-                traf_metadata = extract_metadata(html_content)
-                if traf_metadata:
-                    if not metadata.title and traf_metadata.title:
-                        metadata.title = traf_metadata.title
-                    if traf_metadata.author:
-                        metadata.author = traf_metadata.author
-                    if traf_metadata.description:
-                        metadata.description = traf_metadata.description
-                    if traf_metadata.date:
-                        try:
-                            metadata.publish_date = datetime.fromisoformat(traf_metadata.date)
-                        except (ValueError, TypeError):
-                            pass
-            except Exception as e:
-                logger.warning(f"Trafilatura metadata extraction failed: {e}")
-
-        # Extract standard meta tags
-        meta_tags = soup.find_all('meta')
-        for meta in meta_tags:
-            name = meta.get('name', '').lower()
-            property_name = meta.get('property', '').lower()
-            content = meta.get('content', '')
-
-            # Standard meta tags
-            if name == 'description' and not metadata.description:
+        for meta in soup.find_all("meta"):
+            name = (meta.get("name") or "").lower()
+            property_name = (meta.get("property") or "").lower()
+            content = meta.get("content") or ""
+            if name == "description" and not metadata.description:
                 metadata.description = content
-            elif name == 'author' and not metadata.author:
+            elif name == "author" and not metadata.author:
                 metadata.author = content
-            elif name == 'keywords':
-                metadata.keywords = [k.strip() for k in content.split(',')]
-            elif name == 'language':
+            elif name == "keywords":
+                metadata.keywords = [k.strip() for k in content.split(",") if k.strip()]
+            elif name in ("language", "content-language"):
                 metadata.language = content
-
-            # Open Graph
-            if property_name.startswith('og:'):
-                og_key = property_name.replace('og:', '')
-                metadata.open_graph[og_key] = content
-
-                # Use OG data as fallback
-                if og_key == 'title' and not metadata.title:
+            if property_name.startswith("og:"):
+                metadata.open_graph[property_name] = content
+                if property_name == "og:title" and not metadata.title:
                     metadata.title = content
-                elif og_key == 'description' and not metadata.description:
+                elif property_name == "og:description" and not metadata.description:
                     metadata.description = content
+            elif property_name == "article:author" and not metadata.author and "://" not in content:
+                metadata.author = content
+            elif property_name == "article:modified_time" and not metadata.modified_date:
+                metadata.modified_date = _parse_date(content)
+            if name.startswith("twitter:"):
+                metadata.twitter_card[name[8:]] = content
 
-            # Twitter Card
-            if name.startswith('twitter:'):
-                tw_key = name.replace('twitter:', '')
-                metadata.twitter_card[tw_key] = content
+        for attr, value in _DATE_META:
+            if metadata.publish_date:
+                break
+            tag = find_tag(soup, "meta", attrs={attr: lambda v, want=value: (v or "").lower() == want})
+            metadata.publish_date = _parse_date(attr_text(tag, "content"))
 
-        # Extract canonical URL
-        canonical = soup.find('link', rel='canonical')
-        if canonical and canonical.get('href'):
-            metadata.canonical_url = canonical['href']
+        if not metadata.language:
+            metadata.language = attr_text(find_tag(soup, "html"), "lang")
 
-        # Extract Schema.org structured data
-        schema_scripts = soup.find_all('script', type='application/ld+json')
-        for script in schema_scripts:
+        canonical = attr_text(find_tag(soup, "link", rel="canonical"), "href")
+        if canonical:
+            metadata.canonical_url = canonical
+
+        for script in soup.find_all("script", type="application/ld+json"):
             try:
-                import json
-                schema_data = json.loads(script.string)
-                metadata.schema_org.append(schema_data)
+                data = json.loads(script.string or "")
             except (json.JSONDecodeError, TypeError):
-                pass
+                continue
+            metadata.schema_org.append(data)
+            for item in data if isinstance(data, list) else [data]:
+                if not isinstance(item, dict):
+                    continue
+                if not metadata.publish_date:
+                    metadata.publish_date = _parse_date(item.get("datePublished"))
+                author = item.get("author")
+                if not metadata.author and author:
+                    first = author[0] if isinstance(author, list) and author else author
+                    name = first.get("name") if isinstance(first, dict) else first
+                    if isinstance(name, str):
+                        metadata.author = name
 
+        if not metadata.publish_date:
+            metadata.publish_date = _parse_date(attr_text(find_tag(soup, "time", datetime=True), "datetime"))
         return metadata
-
-    def _extract_main_content(self, html_content: str, soup: BeautifulSoup) -> str:
-        """
-        Extract main content with boilerplate removal.
-
-        Args:
-            html_content: Raw HTML content
-            soup: BeautifulSoup object
-
-        Returns:
-            Clean main content text
-        """
-        if self.remove_boilerplate and TRAFILATURA_AVAILABLE:
-            # Use Trafilatura for boilerplate removal
-            try:
-                main_text = extract(
-                    html_content,
-                    include_comments=False,
-                    include_tables=True,
-                    include_images=False,
-                    output_format='txt'
-                )
-                if main_text:
-                    return main_text
-            except Exception as e:
-                logger.warning(f"Trafilatura extraction failed: {e}")
-
-        # Fallback: Extract from article tag or body
-        article = soup.find('article')
-        if article:
-            return article.get_text(separator='\n', strip=True)
-
-        main = soup.find('main')
-        if main:
-            return main.get_text(separator='\n', strip=True)
-
-        # Last resort: get all text from body
-        body = soup.find('body')
-        if body:
-            return body.get_text(separator='\n', strip=True)
-
-        return ""
-
-    def _get_full_text(self, soup: BeautifulSoup) -> str:
-        """
-        Get full document text without boilerplate removal.
-
-        Args:
-            soup: BeautifulSoup object
-
-        Returns:
-            Full text content
-        """
-        return soup.get_text(separator='\n', strip=True)
 
     def _extract_tables(self, soup: BeautifulSoup) -> list[HTMLTable]:
         """
@@ -521,7 +479,7 @@ class HTMLExtractor(BaseExtractor):
         Returns:
             Metadata dictionary
         """
-        metadata = {
+        metadata: dict[str, Any] = {
             "format": "html",
             "title": html_doc.metadata.title,
             "description": html_doc.metadata.description,

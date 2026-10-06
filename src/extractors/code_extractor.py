@@ -10,6 +10,7 @@ from typing import Any
 
 from ..models.document import RawDocument
 from .base import BaseExtractor
+from .encoding_utils import read_text
 
 
 class CodeExtractor(BaseExtractor):
@@ -63,8 +64,7 @@ class CodeExtractor(BaseExtractor):
         self.validate_file(file_path)
 
         # Read file content
-        with open(file_path, encoding='utf-8', errors='ignore') as f:
-            content = f.read()
+        content, encoding = read_text(file_path)
 
         # Detect language
         extension = Path(file_path).suffix.lower()
@@ -81,7 +81,8 @@ class CodeExtractor(BaseExtractor):
         metadata.update({
             "language": language,
             "lines_of_code": len(content.splitlines()),
-            "format": "code"
+            "format": "code",
+            "encoding": encoding,
         })
 
         return RawDocument(

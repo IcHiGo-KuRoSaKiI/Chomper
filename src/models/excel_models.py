@@ -159,6 +159,16 @@ class ExcelMetadata:
         """Check if workbook has multiple sheets with data."""
         return len(self.active_sheets) > 1
 
+    @property
+    def has_formulas(self) -> bool:
+        """Check if any sheet contains formulas."""
+        return any(sheet.has_formulas for sheet in self.sheets)
+
+    @property
+    def has_merged_cells(self) -> bool:
+        """Check if any sheet contains merged cells."""
+        return any(sheet.has_merged_cells for sheet in self.sheets)
+
 
 @dataclass
 class CSVMetadata:

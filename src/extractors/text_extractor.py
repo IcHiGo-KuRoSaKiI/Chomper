@@ -7,6 +7,7 @@ from typing import Any
 
 from ..models.document import RawDocument
 from .base import BaseExtractor
+from .encoding_utils import read_text
 
 
 class TextExtractor(BaseExtractor):
@@ -43,8 +44,7 @@ class TextExtractor(BaseExtractor):
         self.validate_file(file_path)
 
         # Read file content
-        with open(file_path, encoding='utf-8', errors='ignore') as f:
-            content = f.read()
+        content, encoding = read_text(file_path)
 
         # Detect structure
         structure = None
@@ -55,7 +55,8 @@ class TextExtractor(BaseExtractor):
         metadata = self._get_basic_metadata(file_path)
         metadata.update({
             "format": "text",
-            "line_count": len(content.splitlines())
+            "line_count": len(content.splitlines()),
+            "encoding": encoding,
         })
 
         return RawDocument(
