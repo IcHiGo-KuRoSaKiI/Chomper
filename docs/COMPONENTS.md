@@ -127,8 +127,13 @@ doc = extractor.extract("email.eml")
 # Features:
 # - One pymupdf-layout pass (src/extractors/pdf_layout.py): text, headings,
 #   nested lists, tables and figures in reading order
-# - Tables rendered from the model's cell grid; check marks restored
-#   (src/pdf_structure/cell_marks.py); continued tables get their header back
+# - Tables rendered from the model's cell grid, or from a grid rebuilt from
+#   page geometry when that is clearly better (src/pdf_structure/table_geometry.py);
+#   check marks restored (src/pdf_structure/cell_marks.py); continued tables
+#   get their header back
+# - Row hierarchy kept: first-column indent levels as em spaces, bold group and
+#   total rows; typed or drawn rules become row attributes, never cells
+# - Borderless tables the model left as text are rendered when they are clean grids
 # - Figures (raster and vector) marked as ![caption](image:p<page>-<n>)
 # - Running headers/footers dropped only when they repeat or are page numbers
 # - Scanned pages reported, and OCR'd when Tesseract or RapidOCR is installed
@@ -140,12 +145,16 @@ extractor = PDFExtractor(
     extract_vector_figures=True,  # treat vector charts/diagrams as figures
 )
 doc = extractor.extract("report.pdf")
-# doc.structure includes: pages[], images[]
+# doc.structure includes: pages[], images[], tables[] (layout backend, Markdown
+#   tables: page, bbox, source grid and scores, header_rows, columns, rows with
+#   cells/level/path/emphasis/rule_above/rule_below)
 # doc.metadata includes: page_count, extraction_method ("pymupdf-layout"),
 #   pages_without_text_layer / ocr_pages / warning when pages are scanned
 ```
 
 Measured on 378 ground-truth tables (ICDAR-2013 corrected + SciTSR) against the previous `pymupdf4llm` + `find_tables` path: table adjacency F1 0.894 (was 0.421), detection F1 0.962 (was 0.776), at about 0.13 s/page. `backend="legacy"` keeps the old path (it also accepts `use_markdown` and `table_strategy`).
+
+Geometric table reconstruction (`src/pdf_structure/table_geometry.py`), measured on 469 tables (ICDAR-2013 corrected, all four subsets, + 211 SciTSR test tables) against the model-grid-only output: adjacency F1 0.912 (was 0.883), TEDS 0.878 (was 0.868), detection 0.977 (was 0.972); unruled tables F1 0.888 (was 0.648). 101 of 450 compared tables change: 86 better, 8 worse. On 60 synthetic spec, comparison and statement tables, stub levels, group rows and paths are 100% correct.
 
 #### DOCXExtractor
 **Extensions**: `.docx` (`.doc` is recognised, but legacy binary Word files raise a clear error)

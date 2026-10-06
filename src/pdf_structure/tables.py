@@ -362,10 +362,15 @@ def render_markdown_table(
     if columns <= 0:
         return ""
 
+    def render_cell(cell: str) -> str:
+        # Leading em spaces are a row's indent level (Markdown collapses spaces).
+        indent = re.match(r" *", cell.lstrip(" \t\n")).group(0)  # type: ignore[union-attr]
+        body = re.sub(r"\s+", " ", cell).strip().replace("|", r"\|")
+        return indent + body
+
     def render_row(row: tuple[str, ...]) -> str:
         cells = list(row[:columns]) + [""] * max(0, columns - len(row))
-        clean = [re.sub(r"\s+", " ", cell).strip().replace("|", r"\|") for cell in cells]
-        return "| " + " | ".join(clean) + " |"
+        return "| " + " | ".join(render_cell(cell) for cell in cells) + " |"
 
     return "\n".join(
         [render_row(header), render_row(tuple("---" for _ in range(columns)))]

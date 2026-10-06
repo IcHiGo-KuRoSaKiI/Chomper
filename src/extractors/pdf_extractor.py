@@ -121,6 +121,7 @@ class PDFExtractor(BaseExtractor):
 
         # Extract text using appropriate method
         self._pages_without_text, self._ocr_pages = [], []
+        self._tables: list[dict[str, Any]] = []
         if self.use_markdown and self.backend == "layout":
             full_text, pages = self._extract_with_layout(file_path, pdf_document)
         elif self.use_markdown:
@@ -174,7 +175,7 @@ class PDFExtractor(BaseExtractor):
         return RawDocument(
             text=full_text,
             metadata=metadata,
-            structure={"pages": pages, "images": images}
+            structure={"pages": pages, "images": images, "tables": list(self._tables)},
         )
 
     def _extract_with_layout(self, file_path: str, pdf_document) -> tuple:
@@ -194,6 +195,7 @@ class PDFExtractor(BaseExtractor):
         )
         self._pages_without_text = result.pages_without_text
         self._ocr_pages = result.ocr_pages
+        self._tables = result.tables
 
         pages = []
         for index, layout_page in enumerate(result.pages):

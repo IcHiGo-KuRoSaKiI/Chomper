@@ -73,6 +73,8 @@ class LayoutResult:
     pages: list[LayoutPage]
     pages_without_text: list[int] = field(default_factory=list)
     ocr_pages: list[int] = field(default_factory=list)
+    #: One structured record per rendered table (see ``table_geometry.table_record``).
+    tables: list[dict[str, Any]] = field(default_factory=list)
 
 
 class _StderrStream:
@@ -535,13 +537,14 @@ def extract_with_layout(
             pages_per_key.setdefault(record["_key"], set()).add(index)
     repeated = {k for k, on in pages_per_key.items() if len(on) >= 3 and len(on) > 0.5 * page_count}
 
+    table_records: list[dict[str, Any]] = []
     table_markdown = (
-        _render_tables(parsed, chunks, pdf_document, recover_marks)
+        _render_tables(parsed, chunks, pdf_document, recover_marks, records=table_records)
         if table_format == "markdown"
         else {}
     )
 
-    result = LayoutResult(pages=[])
+    result = LayoutResult(pages=[], tables=table_records)
     for index, chunk in enumerate(chunks):
         page = pdf_document[index]
         text: str = chunk["text"]
@@ -567,7 +570,8 @@ def extract_with_layout(
 
         for box in boxes:
             rendered = table_markdown.get((index, box.get("index")))
-            if box["class"] == "table" and rendered is not None:
+            # Text regions are present only when they hold a borderless table.
+            if box["class"] in ("table", "text") and rendered is not None:
                 start, end = box["pos"]
                 replacements.append((start, end, f"\n\n{rendered}\n\n"))
 
@@ -701,21 +705,98 @@ def _column_span(table: dict[str, Any], box: dict[str, Any]) -> tuple[float, flo
     return (min(starts), y0, max(starts), y1)
 
 
+@dataclass
+class _GridChoice:
+    """The grid a table is rendered from, and why."""
+
+    cells: list[list[Any]]
+    grid: list[list[str]]
+    geometry: Any = None  # GeoTable when the geometric grid won
+    scores: dict[str, dict[str, float | int]] = field(default_factory=dict)
+    snapped: bool = False  # the model's lattice, text re-read from whole words
+
+
+def _choose_grid(
+    page: Any, bbox: tuple[float, float, float, float], cells: list[list[Any]], grid: list[list[str]], words: list[Any]
+) -> _GridChoice:
+    """The model's grid, or the geometric reconstruction when it is clearly
+    better (:func:`~src.pdf_structure.table_geometry.prefer_geometry`)."""
+    from ..pdf_structure import table_geometry as geometry
+
+    choice = _GridChoice(cells=cells, grid=grid)
+    try:
+        geo = geometry.reconstruct(page, bbox, words=words)
+    except Exception as exc:  # pragma: no cover - never lose a table to this layer
+        logger.debug("table geometry failed on page %s: %s", page.number + 1, exc)
+        return choice
+    if geo is None:
+        return choice
+    model_score = geometry.grid_quality(words, cells, geo)
+    geo_score = geometry.grid_quality(words, geo.cell_boxes, geo)
+    choice.scores = {"model": model_score.as_dict(), "geometry": geo_score.as_dict()}
+    if model_score.split_words:
+        # The model's lattice with whole words: no cut words, same columns.
+        snapped = geometry.snap_to_words(words, cells)
+        cut = model_score.split_words
+        model_score.assigned = min(1.0, model_score.assigned + cut / max(1, model_score.words))
+        model_score.split_words = 0
+        choice.grid, choice.snapped = snapped, True
+        choice.scores["model_words"] = model_score.as_dict()
+    if geometry.prefer_geometry(model_score, geo_score):
+        choice.cells, choice.grid, choice.geometry = geo.cell_boxes, geo.grid, geo
+        choice.snapped = False
+    return choice
+
+
+def _text_run_table(page: Any, box: dict[str, Any]) -> Any:
+    """A borderless table the layout model left as a text region, or ``None``.
+
+    Only clean grids qualify (:meth:`GeoTable.is_clean_grid`): several rows of
+    short, mostly numeric cells in whitespace-separated columns.
+    """
+    from ..pdf_structure import table_geometry as geometry
+
+    bbox = _box(box)
+    words = geometry.page_words(page, (bbox[0] - 1, bbox[1] - 1, bbox[2] + 1, bbox[3] + 1))
+    if len(words) < 6:
+        return None
+    lines = geometry.group_lines(words)
+    if len(lines) < 3:
+        return None
+    # Every line must break into phrases: prose lines are one phrase each.
+    if sum(len(geometry.split_segments(line)) >= 2 for line in lines) < 0.8 * len(lines):
+        return None
+    geo = geometry.reconstruct(page, bbox, words=words)
+    if geo is None or geo.title or geo.notes or not geo.is_clean_grid():
+        return None
+    return geo
+
+
 def _render_tables(
     parsed: Any,
     chunks: list[dict[str, Any]],
     pdf_document: Any,
     recover_marks: bool = True,
+    records: list[dict[str, Any]] | None = None,
 ) -> dict[tuple[int, int], str]:
     """
     Markdown for every table region, keyed by ``(page index, box index)``.
 
-    Rendered from the model's cell grid rather than taken from its Markdown,
+    Rendered from a cell grid rather than taken from the model's Markdown,
     which leaves ``|`` inside cells unescaped (splitting the column) and reads
     cell borders as strikethrough. A table continuing on the next page gets its
     header row back, as the structural chunker does. With ``recover_marks``,
     check marks and crosses that extract as symbol-font junk or not at all are
     restored (see :mod:`src.pdf_structure.cell_marks`).
+
+    The grid is the model's unless the geometric reconstruction of the same
+    region (:mod:`src.pdf_structure.table_geometry`) is clearly better: the
+    model's grid splits words between cells, puts several columns' values in
+    one cell, or stacks rows (a units line in a value cell), and the geometric
+    one does not. Either way, rule glyphs (``––––``) become row attributes, the
+    first column's indent levels show as em-spaces, and group and total rows
+    are bold. Text regions that hold a clean borderless table are rendered as
+    tables too. One structured record per table is appended to ``records``.
 
     Feature matrices whose mark-only columns the model merged or dropped are
     rebuilt: from the ruled grid when the columns are drawn
@@ -723,54 +804,107 @@ def _render_tables(
     from the marks' own positions
     (:func:`~src.pdf_structure.cell_marks.recover_mark_columns`).
     """
+    from ..pdf_structure import table_geometry as geometry
     from ..pdf_structure.tables import (
         TableRegion,
         inherit_continuation_headers,
+        is_mark_matrix,
         render_ruled_pieces,
         ruled_grids_for_sparse_matrix,
     )
 
     regions: list[tuple[tuple[int, int], TableRegion]] = []
     direct: dict[tuple[int, int], str] = {}
+    around: dict[tuple[int, int], tuple[list[str], list[str]]] = {}
+    pending: list[tuple[tuple[int, int], dict[str, Any]]] = []
     for page_index, chunk in enumerate(chunks):
         layout_boxes = parsed.pages[page_index].boxes if page_index < len(parsed.pages) else []
         page_height = float(pdf_document[page_index].rect.height)
         for box in chunk.get("page_boxes", []):
             box_index = box.get("index")
-            if box["class"] != "table" or box_index is None or box_index >= len(layout_boxes):
+            if box_index is None or box_index >= len(layout_boxes):
                 continue
-            table = getattr(layout_boxes[box_index], "table", None) or {}
-            grid = table.get("extract") or []
-            if not grid:
-                continue
-            cells = table.get("cells") or []
             page = pdf_document[page_index]
-            if recover_marks and len(cells) == len(grid):
-                grid = recover_cell_marks(page, cells, grid)
-            # Sparse feature matrices: the model merges columns that hold no text.
-            pieces = ruled_grids_for_sparse_matrix(
-                page,
-                _box(box),
-                [["" if c is None else str(c) for c in row] for row in grid],
-                recover_cell_marks if recover_marks else None,
-            )
-            if pieces is not None and len(pieces) == 1 and pieces[0].grid is not None:
-                cells, grid = pieces[0].cells or [], pieces[0].grid
-            elif pieces is not None:
-                direct[(page_index, box_index)] = render_ruled_pieces(pieces)
+            if box["class"] == "text":
+                geo = _text_run_table(page, box)
+                if geo is None:
+                    continue
+                cells, grid = geo.cell_boxes, geo.grid
+                choice = _GridChoice(cells=cells, grid=grid, geometry=geo)
+                table: dict[str, Any] = {"cells": cells}
+                source = "geometry-text"
+            elif box["class"] == "table":
+                table = getattr(layout_boxes[box_index], "table", None) or {}
+                grid = table.get("extract") or []
+                if not grid:
+                    continue
+                cells = table.get("cells") or []
+                grid = [["" if c is None else str(c) for c in row] for row in grid]
+                marked = False
+                if recover_marks and len(cells) == len(grid):
+                    recovered = [["" if c is None else str(c) for c in row] for row in recover_cell_marks(page, cells, grid)]
+                    marked = recovered != grid
+                    grid = recovered
+                # Sparse feature matrices: the model merges columns that hold no text.
+                pieces = ruled_grids_for_sparse_matrix(
+                    page,
+                    _box(box),
+                    grid,
+                    recover_cell_marks if recover_marks else None,
+                )
+                choice = _GridChoice(cells=cells, grid=grid)
+                if pieces is not None and len(pieces) == 1 and pieces[0].grid is not None:
+                    choice = _GridChoice(cells=pieces[0].cells or [], grid=pieces[0].grid)
+                elif pieces is not None:
+                    direct[(page_index, box_index)] = render_ruled_pieces(pieces)
+                    continue
+                else:
+                    if len(cells) == len(grid) and not marked and not is_mark_matrix(grid):
+                        region_box = _box(box)
+                        words = geometry.page_words(
+                            page, (region_box[0] - 1, region_box[1] - 1, region_box[2] + 1, region_box[3] + 1)
+                        )
+                        choice = _choose_grid(page, region_box, cells, grid, words)
+                        if (choice.geometry is not None or choice.snapped) and recover_marks:
+                            choice.grid = [
+                                ["" if c is None else str(c) for c in row]
+                                for row in recover_cell_marks(page, choice.cells, choice.grid)
+                            ]
+                    if choice.geometry is None and recover_marks and len(cells) == len(grid):
+                        # Unruled: mark-only columns the model dropped altogether.
+                        rebuilt = recover_mark_columns(page, cells, grid)
+                        if rebuilt is not None:
+                            choice.cells, choice.grid = rebuilt
+                source = "geometry" if choice.geometry is not None else ("model-words" if choice.snapped else "model")
+            else:
                 continue
-            elif recover_marks and len(cells) == len(grid):
-                # Unruled: mark-only columns the model dropped altogether.
-                rebuilt = recover_mark_columns(page, cells, grid)
-                if rebuilt is not None:
-                    cells, grid = rebuilt
-            rows = tuple(tuple("" if c is None else str(c) for c in row) for row in grid)
+
+            region_box = _box(box)
+            if choice.geometry is not None:
+                infos = geometry.rows_from_geometry(choice.geometry)
+                for info, texts in zip(infos, choice.grid, strict=True):
+                    info.cells = list(texts)
+            else:
+                words = geometry.page_words(
+                    page, (region_box[0] - 1, region_box[1] - 1, region_box[2] + 1, region_box[3] + 1)
+                )
+                infos = geometry.rows_from_grid(words, choice.cells, choice.grid)
+            if not infos:
+                continue
+            header_rows = geometry.annotate_rows(infos)
+            formatted = geometry.format_cells(infos)
+            rows = tuple(tuple(row) for row in formatted)
             columns = max(len(row) for row in rows)
+            key = (page_index, box_index)
+            title = list(choice.geometry.title) if choice.geometry is not None else []
+            notes = list(choice.geometry.notes) if choice.geometry is not None else []
+            if title or notes:
+                around[key] = (title, notes)
             regions.append((
-                (page_index, box_index),
+                key,
                 TableRegion(
                     page=page_index + 1,
-                    bbox=_column_span(table, box),
+                    bbox=_column_span(table, box) if source in ("model", "model-words") else region_box,
                     rows=len(rows),
                     cols=columns,
                     ordinals=frozenset(),
@@ -779,9 +913,25 @@ def _render_tables(
                     page_height=page_height,
                 ),
             ))
+            pending.append((key, geometry.table_record(
+                page=page_index + 1,
+                bbox=region_box,
+                infos=infos,
+                header_rows=header_rows,
+                source=source,
+                scores=choice.scores,
+                columns=choice.geometry.columns if choice.geometry is not None else None,
+                title=title,
+                notes=notes,
+            )))
     ordered = sorted(regions, key=lambda item: (item[1].page, item[1].bbox[1], item[1].bbox[0]))
     restored = inherit_continuation_headers([region for _, region in ordered])
-    rendered = {key: region.markdown for (key, _), region in zip(ordered, restored, strict=True)}
+    rendered: dict[tuple[int, int], str] = {}
+    for (key, _), region in zip(ordered, restored, strict=True):
+        title, notes = around.get(key, ([], []))
+        rendered[key] = "\n\n".join([*title, region.markdown, *notes])
+    if records is not None:
+        records.extend(record for _, record in sorted(pending, key=lambda item: item[0]))
     return {**rendered, **direct}
 
 
