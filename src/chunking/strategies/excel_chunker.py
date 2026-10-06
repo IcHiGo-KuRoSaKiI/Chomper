@@ -37,7 +37,11 @@ class ExcelChunker(BaseChunker):
         strategy: str = "auto",
         chunk_size: int = 100,  # For by_rows strategy
         preserve_headers: bool = True,
-        convert_to_html: bool = True
+        convert_to_html: bool = True,
+        *,
+        target_size: int = 1000,
+        overlap: int = 0,
+        preserve_context: bool = True,
     ):
         """
         Initialize Excel chunker.
@@ -47,7 +51,14 @@ class ExcelChunker(BaseChunker):
             chunk_size: Number of rows per chunk (for by_rows strategy)
             preserve_headers: Include headers in each chunk
             convert_to_html: Convert tables to HTML format for LLMs
+            target_size: Accepted for a uniform chunker interface; spreadsheets
+                are chunked by sheet, table or ``chunk_size`` rows, not words
+            overlap: Accepted for a uniform chunker interface (rows never overlap)
+            preserve_context: Accepted for a uniform chunker interface
         """
+        self.target_size = target_size
+        self.overlap = overlap
+        self.preserve_context = preserve_context
         self.strategy = strategy
         self.chunk_size = chunk_size
         self.preserve_headers = preserve_headers
@@ -55,6 +66,9 @@ class ExcelChunker(BaseChunker):
 
         if strategy not in ["auto", "by_sheet", "by_table", "by_rows"]:
             raise ValueError(f"Unknown strategy: {strategy}")
+        if chunk_size < 1:
+            # A zero row budget would never advance the by_rows loops.
+            raise ValueError(f"chunk_size must be at least 1 row, got {chunk_size}")
 
     def chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """

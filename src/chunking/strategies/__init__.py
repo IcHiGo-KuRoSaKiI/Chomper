@@ -10,11 +10,20 @@ from .pptx_chunker import PPTXChunker
 from .structural_pdf_chunker import StructuralPDFChunker
 from .text_chunker import TextChunker
 
-# Semantic chunker (requires sentence-transformers, lazy-loaded)
-try:
-    from .semantic_chunker import SemanticChunker
-except ImportError:
-    SemanticChunker = None
+
+def __getattr__(name: str):
+    """Import SemanticChunker (numpy, sentence-transformers) only when asked for.
+
+    Resolves to None when numpy is missing, matching the old eager behaviour.
+    """
+    if name != "SemanticChunker":
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    try:
+        from .semantic_chunker import SemanticChunker as cls
+    except ImportError:
+        cls = None
+    globals()["SemanticChunker"] = cls
+    return cls
 
 __all__ = [
     "PDFChunker",

@@ -4,16 +4,18 @@ HTML chunking strategies.
 Provides 4 chunking strategies for HTML documents:
 1. semantic: Chunk by semantic sections (article, section, nav, etc.)
 2. structural: Chunk by heading hierarchy (h1-h6)
-3. fixed_size: Fixed character-count chunks with paragraph boundaries
+3. fixed_size: Size-bounded chunks (words) on paragraph/line boundaries
 4. auto: Intelligent selection based on document structure
 """
+from __future__ import annotations
+
 import logging
-import re
 from typing import Any
 
 from ...models.document import Chunk, RawDocument
 from ...models.html_models import HTMLDocument, HTMLTable
 from ..base import BaseChunker
+from ..text_splitter import split_spans
 
 logger = logging.getLogger(__name__)
 
@@ -23,44 +25,55 @@ class HTMLChunker(BaseChunker):
     Chunk HTML documents using intelligent strategies.
 
     Strategies:
-    - semantic: Chunk by semantic HTML5 sections (article, section, nav, etc.)
-    - structural: Chunk by heading hierarchy (h1, h2, h3, etc.)
-    - fixed_size: Fixed character-count chunks with paragraph boundaries
-    - auto: Automatically select best strategy based on document structure
+    - semantic: one chunk per semantic HTML5 section (article, section, nav, ...),
+      oversized sections split on structure
+    - structural: heading-bounded chunks of the extracted text
+    - fixed_size: size-bounded chunks of the extracted text on paragraph/line breaks
+    - auto: pick one of the above from the document structure
 
-    Features:
-    - Preserves tables as separate chunks
-    - Respects paragraph boundaries
-    - Includes heading context in chunks
-    - Handles nested sections
+    Sizes are in words, like every other chunker. Text chunks of the
+    ``structural``/``fixed_size`` strategies are exact substrings of ``raw_doc.text``
+    with true offsets; ``semantic`` chunks point into it when the section text is
+    found there (``metadata["offsets"] == "text"``).
     """
+
+    STRATEGIES = ("semantic", "structural", "fixed_size", "auto")
 
     def __init__(
         self,
+        target_size: int = 300,
+        overlap: int = 50,
+        preserve_context: bool = True,
+        *,
         strategy: str = "auto",
-        chunk_size: int = 1000,
         include_tables_separately: bool = True,
         preserve_headings: bool = True,
-        overlap_size: int = 100
+        chunk_size: int | None = None,
+        overlap_size: int | None = None,
     ):
         """
         Initialize HTML chunker.
 
         Args:
-            strategy: Chunking strategy ("semantic", "structural", "fixed_size", "auto")
-            chunk_size: Target chunk size in characters (for fixed_size strategy)
-            include_tables_separately: Extract tables as separate chunks
-            preserve_headings: Include heading text in each chunk
-            overlap_size: Overlap between fixed-size chunks
+            target_size: Maximum words per chunk
+            overlap: Words repeated from the previous chunk
+            preserve_context: Maintain heading context
+            strategy: "semantic", "structural", "fixed_size" or "auto"
+            include_tables_separately: Also emit each table as its own HTML chunk
+            preserve_headings: Prefix semantic-section chunks with their heading
+            chunk_size: Deprecated character budget; converted to words (/6)
+            overlap_size: Deprecated character overlap; converted to words (/6)
         """
-        if strategy not in ["semantic", "structural", "fixed_size", "auto"]:
-            raise ValueError(f"Invalid strategy: {strategy}")
-
+        if strategy not in self.STRATEGIES:
+            raise ValueError(f"Invalid strategy: {strategy}. Use one of {self.STRATEGIES}")
+        if chunk_size is not None:
+            target_size = max(1, chunk_size // 6)
+        if overlap_size is not None:
+            overlap = max(0, overlap_size // 6)
+        super().__init__(target_size, overlap, preserve_context)
         self.strategy = strategy
-        self.chunk_size = chunk_size
         self.include_tables_separately = include_tables_separately
         self.preserve_headings = preserve_headings
-        self.overlap_size = overlap_size
 
     def chunk(self, raw_doc: RawDocument) -> list[Chunk]:
         """
@@ -72,32 +85,27 @@ class HTMLChunker(BaseChunker):
         Returns:
             List of chunks
         """
-        html_doc = raw_doc.structure.get('html_document')
+        html_doc = (raw_doc.structure or {}).get('html_document')
 
         if not html_doc:
-            # Fallback to fixed-size chunking if no HTML structure
-            logger.warning("No HTML structure found, using fixed-size chunking")
+            logger.info("No HTML structure found, using structure-aware text chunking")
             return self._chunk_fixed_size(raw_doc.text, raw_doc.metadata)
 
-        # Auto-select strategy if needed
         if self.strategy == "auto":
             selected_strategy = self._auto_select_strategy(html_doc)
-            logger.info(f"Auto-selected strategy: {selected_strategy}")
+            logger.debug(f"Auto-selected strategy: {selected_strategy}")
         else:
             selected_strategy = self.strategy
 
-        # Execute selected strategy
         if selected_strategy == "semantic":
-            chunks = self._chunk_semantic(html_doc, raw_doc.metadata)
+            chunks = self._chunk_semantic(html_doc, raw_doc.metadata, raw_doc.text)
         elif selected_strategy == "structural":
             chunks = self._chunk_structural(raw_doc.text, html_doc, raw_doc.metadata)
         else:  # fixed_size
-            chunks = self._chunk_fixed_size(html_doc.main_content, raw_doc.metadata)
+            chunks = self._chunk_fixed_size(raw_doc.text, raw_doc.metadata)
 
-        # Add tables as separate chunks if enabled
         if self.include_tables_separately and html_doc.tables:
-            table_chunks = self._chunk_tables(html_doc.tables, raw_doc.metadata)
-            chunks.extend(table_chunks)
+            chunks.extend(self._chunk_tables(html_doc.tables, raw_doc.metadata, len(chunks)))
 
         return chunks
 
@@ -106,9 +114,9 @@ class HTMLChunker(BaseChunker):
         Automatically select best chunking strategy.
 
         Logic:
-        - Has semantic sections (article, section) → semantic
-        - Has clear heading structure (3+ levels) → structural
-        - Otherwise → fixed_size
+        - Has semantic sections (article, section) -> semantic
+        - Has clear heading structure (5+ headings) -> structural
+        - Otherwise -> fixed_size
 
         Args:
             html_doc: HTMLDocument object
@@ -116,74 +124,75 @@ class HTMLChunker(BaseChunker):
         Returns:
             Selected strategy name
         """
-        # Check for semantic sections
         if html_doc.num_sections >= 3:
             semantic_tags = {'article', 'section', 'aside'}
-            has_semantic = any(
-                section.tag in semantic_tags
-                for section in html_doc.sections
-            )
-            if has_semantic:
+            if any(section.tag in semantic_tags for section in html_doc.sections):
                 return "semantic"
 
-        # Check for heading structure
         if html_doc.num_headings >= 5:
-            # Has clear heading structure
             return "structural"
 
-        # Default to fixed-size
         return "fixed_size"
 
     def _chunk_semantic(
         self,
         html_doc: HTMLDocument,
-        metadata: dict[str, Any]
+        metadata: dict[str, Any],
+        full_text: str = "",
     ) -> list[Chunk]:
         """
-        Chunk by semantic HTML sections.
-
-        Creates one chunk per semantic section (article, section, nav, aside).
+        Chunk by semantic HTML sections; oversized sections are split on structure.
 
         Args:
             html_doc: HTMLDocument object
             metadata: Document metadata
+            full_text: Extracted document text, used to locate true offsets
 
         Returns:
             List of chunks
         """
-        chunks = []
-        chunk_id = 0
+        chunks: list[Chunk] = []
+        cursor = 0
 
         for section in html_doc.sections:
-            # Skip empty sections
             if section.is_empty:
                 continue
 
-            # Build chunk text
-            chunk_text = ""
-            if section.heading and self.preserve_headings:
-                chunk_text = f"{section.heading}\n\n"
+            body = section.text
+            if section.heading and self.preserve_headings and not body.lstrip().startswith(
+                section.heading
+            ):
+                body = f"{section.heading}\n\n{body}"
 
-            chunk_text += section.text
-
-            # Create chunk
-            chunk = Chunk(
-                chunk_id=f"chunk_{chunk_id}",
-                text=chunk_text,
-                start_char=section.start_char,
-                end_char=section.end_char,
-                metadata={
-                    **metadata,
-                    "chunk_strategy": "semantic",
-                    "section_tag": section.tag,
-                    "section_heading": section.heading,
-                    "heading_level": section.heading_level,
-                    "section_index": section.section_index,
-                    "has_subsections": section.has_subsections
-                }
-            )
-            chunks.append(chunk)
-            chunk_id += 1
+            for s, e in split_spans(body, self.target_size, self.overlap):
+                piece = body[s:e]
+                found = full_text.find(piece, cursor) if full_text else -1
+                if found == -1 and full_text:
+                    found = full_text.find(piece)
+                if found >= 0:
+                    start_char, end_char, offsets = found, found + len(piece), "text"
+                    cursor = found
+                else:
+                    start_char = section.start_char + s
+                    end_char = start_char + len(piece)
+                    offsets = "section"
+                chunks.append(Chunk(
+                    chunk_id=len(chunks),
+                    text=piece,
+                    start_char=start_char,
+                    end_char=end_char,
+                    metadata={
+                        "chunk_strategy": "semantic",
+                        "section_name": section.heading,
+                        "section_tag": section.tag,
+                        "section_heading": section.heading,
+                        "heading_level": section.heading_level,
+                        "section_index": section.section_index,
+                        "has_subsections": section.has_subsections,
+                        "section_type": "text",
+                        "offsets": offsets,
+                    }
+                ))
 
         return chunks
 
@@ -194,94 +203,17 @@ class HTMLChunker(BaseChunker):
         metadata: dict[str, Any]
     ) -> list[Chunk]:
         """
-        Chunk by heading hierarchy.
-
-        Splits document at each heading (h1-h6) and includes heading in chunk.
+        Chunk by heading hierarchy: every Markdown-style heading starts a chunk.
 
         Args:
-            full_text: Full document text
+            full_text: Full document text (``raw_doc.text``)
             html_doc: HTMLDocument object
             metadata: Document metadata
 
         Returns:
-            List of chunks
+            List of chunks (exact substrings of ``full_text``)
         """
-        chunks = []
-        chunk_id = 0
-
-        # Split by headings using main content
-        text = html_doc.main_content
-        if not text:
-            text = full_text
-
-        # Simple approach: Split on double newlines (paragraph boundaries)
-        # and group paragraphs between headings
-        paragraphs = text.split('\n\n')
-        current_chunk_text = []
-        current_heading = None
-        current_heading_level = None
-
-        heading_pattern = re.compile(r'^(#{1,6})\s+(.+)$')  # Markdown-style headings
-        start_char = 0
-
-        for para in paragraphs:
-            para = para.strip()
-            if not para:
-                continue
-
-            # Check if paragraph is a heading
-            match = heading_pattern.match(para)
-            is_heading = match is not None
-
-            if is_heading:
-                # Save previous chunk
-                if current_chunk_text:
-                    chunk_text = '\n\n'.join(current_chunk_text)
-                    end_char = start_char + len(chunk_text)
-
-                    chunk = Chunk(
-                        chunk_id=f"chunk_{chunk_id}",
-                        text=chunk_text,
-                        start_char=start_char,
-                        end_char=end_char,
-                        metadata={
-                            **metadata,
-                            "chunk_strategy": "structural",
-                            "heading": current_heading,
-                            "heading_level": current_heading_level
-                        }
-                    )
-                    chunks.append(chunk)
-                    chunk_id += 1
-                    start_char = end_char
-
-                # Start new chunk with heading
-                current_heading = match.group(2)
-                current_heading_level = len(match.group(1))
-                current_chunk_text = [para]
-            else:
-                current_chunk_text.append(para)
-
-        # Add final chunk
-        if current_chunk_text:
-            chunk_text = '\n\n'.join(current_chunk_text)
-            end_char = start_char + len(chunk_text)
-
-            chunk = Chunk(
-                chunk_id=f"chunk_{chunk_id}",
-                text=chunk_text,
-                start_char=start_char,
-                end_char=end_char,
-                metadata={
-                    **metadata,
-                    "chunk_strategy": "structural",
-                    "heading": current_heading,
-                    "heading_level": current_heading_level
-                }
-            )
-            chunks.append(chunk)
-
-        return chunks
+        return self._chunks_from_text(full_text, section_level=6, strategy="structural")
 
     def _chunk_fixed_size(
         self,
@@ -289,96 +221,24 @@ class HTMLChunker(BaseChunker):
         metadata: dict[str, Any]
     ) -> list[Chunk]:
         """
-        Chunk by fixed character count with paragraph boundaries.
+        Size-bounded chunks on paragraph, line and sentence boundaries.
 
         Args:
             text: Document text
             metadata: Document metadata
 
         Returns:
-            List of chunks
+            List of chunks (exact substrings of ``text``)
         """
-        chunks = []
-        chunk_id = 0
-
-        # Split into paragraphs
-        paragraphs = text.split('\n\n')
-        current_chunk_paras = []
-        current_size = 0
-        start_char = 0
-
-        for para in paragraphs:
-            para = para.strip()
-            if not para:
-                continue
-
-            para_size = len(para)
-
-            # Check if adding this paragraph exceeds chunk size
-            if current_size + para_size > self.chunk_size and current_chunk_paras:
-                # Save current chunk
-                chunk_text = '\n\n'.join(current_chunk_paras)
-                end_char = start_char + len(chunk_text)
-
-                chunk = Chunk(
-                    chunk_id=f"chunk_{chunk_id}",
-                    text=chunk_text,
-                    start_char=start_char,
-                    end_char=end_char,
-                    metadata={
-                        **metadata,
-                        "chunk_strategy": "fixed_size",
-                        "chunk_size": self.chunk_size,
-                        "actual_size": len(chunk_text)
-                    }
-                )
-                chunks.append(chunk)
-                chunk_id += 1
-
-                # Add overlap from previous chunk
-                if self.overlap_size > 0 and current_chunk_paras:
-                    overlap_text = current_chunk_paras[-1]
-                    if len(overlap_text) <= self.overlap_size:
-                        current_chunk_paras = [overlap_text]
-                        current_size = len(overlap_text)
-                    else:
-                        current_chunk_paras = []
-                        current_size = 0
-                else:
-                    current_chunk_paras = []
-                    current_size = 0
-
-                start_char = end_char - (len(overlap_text) if self.overlap_size > 0 else 0)
-
-            # Add paragraph to current chunk
-            current_chunk_paras.append(para)
-            current_size += para_size
-
-        # Add final chunk
-        if current_chunk_paras:
-            chunk_text = '\n\n'.join(current_chunk_paras)
-            end_char = start_char + len(chunk_text)
-
-            chunk = Chunk(
-                chunk_id=f"chunk_{chunk_id}",
-                text=chunk_text,
-                start_char=start_char,
-                end_char=end_char,
-                metadata={
-                    **metadata,
-                    "chunk_strategy": "fixed_size",
-                    "chunk_size": self.chunk_size,
-                    "actual_size": len(chunk_text)
-                }
-            )
-            chunks.append(chunk)
-
-        return chunks
+        if not (text or "").strip():
+            return []
+        return self._chunks_from_text(text, section_level=0, strategy="fixed_size")
 
     def _chunk_tables(
         self,
         tables: list[HTMLTable],
-        metadata: dict[str, Any]
+        metadata: dict[str, Any],
+        start_id: int = 0,
     ) -> list[Chunk]:
         """
         Extract tables as separate chunks.
@@ -392,20 +252,21 @@ class HTMLChunker(BaseChunker):
         Returns:
             List of table chunks
         """
-        chunks = []
+        chunks: list[Chunk] = []
 
         for table in tables:
             # Convert table to HTML
             table_html = table.to_html()
 
             chunk = Chunk(
-                chunk_id=f"table_{table.table_index}",
+                chunk_id=start_id + len(chunks),
                 text=table_html,
                 start_char=0,
                 end_char=len(table_html),
                 metadata={
-                    **metadata,
                     "chunk_strategy": "table",
+                    "section_type": "table",
+                    "offsets": "none",
                     "chunk_type": "table",
                     "table_index": table.table_index,
                     "table_caption": table.caption,
