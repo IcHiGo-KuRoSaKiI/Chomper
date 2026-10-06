@@ -31,8 +31,6 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-import pymupdf as fitz
-
 from ..pdf_structure.figures import CAPTION_RE, Caption, find_caption, share_captions
 from ..pdf_structure.lists import list_indent_hints, normalize_markdown_lists
 from .image_utils import image_marker, image_record

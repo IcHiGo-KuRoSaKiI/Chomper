@@ -55,7 +55,6 @@ from src.pdf_structure.tables import (  # noqa: E402
 )
 from src.tests.fixtures.make_pdf_fixtures import FIXTURES  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # fixtures
 # ---------------------------------------------------------------------------
