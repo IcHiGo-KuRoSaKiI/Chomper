@@ -142,3 +142,27 @@ def test_markdown_list_levels_normalised():
 def test_code_fences_untouched():
     md = "```\n    - not a list\n\n  * nor this\n```"
     assert normalize_markdown_lists(md) == md
+
+
+def test_list_continuing_in_next_column_is_not_nested():
+    md = "- Jan\n- Feb\n  - Jul\n  - Aug\n"
+    hints = {"jan": (50.0, 600.0), "feb": (50.0, 612.0), "jul": (320.0, 80.0), "aug": (320.0, 92.0)}
+    assert normalize_markdown_lists(md, hints) == "- Jan\n- Feb\n- Jul\n- Aug\n"
+
+
+def test_nesting_from_positions_beats_space_counts():
+    md = "  - parent\n   - child\n   - child two\n  - next\n"
+    hints = {
+        "parent": (70.4, 100.0),
+        "child": (93.2, 112.0),
+        "child two": (93.2, 124.0),
+        "next": (70.4, 136.0),
+    }
+    assert normalize_markdown_lists(md, hints) == "- parent\n  - child\n  - child two\n- next\n"
+
+
+def test_wrapped_item_text_is_joined():
+    md = "- October 12—Indigenous Peoples’ Day (Columbus\nDay)\n- November 11—Veterans Day\n\nNext paragraph."
+    assert normalize_markdown_lists(md) == (
+        "- October 12—Indigenous Peoples’ Day (Columbus Day)\n- November 11—Veterans Day\n\nNext paragraph."
+    )

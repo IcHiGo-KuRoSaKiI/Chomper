@@ -161,31 +161,41 @@ def _join(head: str, tail: str) -> str:
 
 
 _MD_ITEM = re.compile(r"^(\s*)([-*+]|\d{1,3}[.)])\s+(.*)$")
+#: Lines that are never an item's wrapped text.
+_STRUCTURAL = re.compile(r"^\s*(#|\||```|>|!\[|\*\*[^*]+\*\*\s*$)")
 
 
 def _hint_key(body: str) -> str:
     return " ".join(re.sub(r"[*_`]", "", body).split())[:60].casefold()
 
 
-def list_indent_hints(lines: Sequence[_Line]) -> dict[str, float]:
+def list_indent_hints(lines: Sequence[_Line]) -> dict[str, tuple[float, float]]:
     """
-    Map each list item's text to the x position of its marker on the page.
+    Map each list item's text to the (x, y) position of its marker on the page.
 
     ``pymupdf4llm`` rounds indentation to a few spaces, and siblings at the same
     depth come out with different widths. The page coordinates are exact, so
     :func:`normalize_markdown_lists` prefers them when it can match the item.
     """
-    hints: dict[str, float] = {}
+    hints: dict[str, tuple[float, float]] = {}
     in_list = False
     for line in lines:
         marker = parse_marker(line.text, in_list=in_list)
         in_list = marker is not None
         if marker is not None:
-            hints.setdefault(_hint_key(marker.body), float(line.bbox[0]))
+            hints.setdefault(_hint_key(marker.body), (float(line.bbox[0]), float(line.bbox[1])))
     return hints
 
 
-def normalize_markdown_lists(markdown: str, indent_hints: dict[str, float] | None = None) -> str:
+#: A list continuing in the next column jumps right by a column width and back
+#: up the page; a nested item moves right by an indent and down. Indents are
+#: well under this.
+_MAX_INDENT_STEP = 72.0
+
+
+def normalize_markdown_lists(
+    markdown: str, indent_hints: dict[str, tuple[float, float]] | None = None
+) -> str:
     """
     Make Markdown list blocks consistent: two-space nesting, no blank lines
     between items of one list, and recognised PDF bullet glyphs turned into
@@ -209,16 +219,26 @@ def normalize_markdown_lists(markdown: str, indent_hints: dict[str, float] | Non
         # Walk in order with a stack of open indents: one space either way is the
         # same level (pymupdf4llm emits 4 then 3 spaces for siblings), two or
         # more deeper opens a level, shallower closes levels.
-        positions = [hints.get(_hint_key(body)) for _, _, body in block]
-        if all(x is not None for x in positions):
-            depths = [float(x) for x in positions if x is not None]
+        found = [hints.get(_hint_key(body)) for _, _, body in block]
+        positions = [p for p in found if p is not None]
+        use_hints = len(positions) == len(block)
+        if use_hints:
+            depths = [x for x, _ in positions]
             tolerance = 3.0  # points
         else:
             depths = [float(width) for width, _, _ in block]
             tolerance = 1.0  # spaces
         stack: list[float] = []
         top_kind: bool | None = None
-        for depth, (_, marker, body) in zip(depths, block, strict=True):
+        previous: tuple[float, float] | None = None
+        for index, (depth, (_, marker, body)) in enumerate(zip(depths, block, strict=True)):
+            if use_hints:
+                x, y = positions[index]
+                if previous is not None and (y < previous[1] - 2 or x - previous[0] > _MAX_INDENT_STEP):
+                    # Same list, next column: keep the depth the list had there.
+                    shift = x - previous[0]
+                    stack = [d + shift for d in stack]
+                previous = (x, y)
             while stack and depth < stack[-1] - tolerance:
                 stack.pop()
             if not stack or depth > stack[-1] + tolerance:
@@ -269,8 +289,14 @@ def normalize_markdown_lists(markdown: str, indent_hints: dict[str, float] | Non
             pending_blank += 1
             continue
 
-        # A non-blank, non-item line ends the block (continuation paragraphs
-        # inside items are rare in pymupdf4llm output and kept as their own text).
+        # An unindented line straight after an item, with no blank line, is the
+        # item's text wrapping (Markdown "lazy continuation"): join it.
+        if block and not pending_blank and not _STRUCTURAL.match(raw):
+            width, marker, body = block[-1]
+            block[-1] = (width, marker, _join(body, raw.strip()))
+            continue
+
+        # Anything else ends the block.
         flush_block()
         out.extend([""] * pending_blank)
         pending_blank = 0
