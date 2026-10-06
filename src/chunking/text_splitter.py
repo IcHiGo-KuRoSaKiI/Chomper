@@ -243,12 +243,17 @@ def pack(
     while fresh < n:
         total = 0
         i = s
+        has_body = False  # a non-heading unit beyond the overlap is in the chunk
         while i < n and (
             i <= fresh
             or total + units[i].words <= target
-            or units[i - 1].kind == "heading"  # a heading never ends a chunk
+            # A chunk that so far holds only headings takes the next unit even if
+            # it overflows; otherwise the overflow is cut before the heading.
+            or (units[i - 1].kind == "heading" and not has_body)
         ):
             total += units[i].words
+            if i >= fresh and units[i].kind != "heading":
+                has_body = True
             i += 1
         if i >= n:
             b = n

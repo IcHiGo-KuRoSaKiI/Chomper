@@ -11,6 +11,8 @@ from collections import Counter
 from ..models.document import Chunk, EnrichedChunk
 from .base import BaseEnricher
 
+_URL_RE = re.compile(r"\]\([^)\s]*\)|<?(?:https?|ftp)://\S+|\bwww\.\S+|\S+\.(?:svg|png|jpe?g|gif)\b")
+
 
 class KeywordExtractor(BaseEnricher):
     """
@@ -95,8 +97,10 @@ class KeywordExtractor(BaseEnricher):
             token_pattern=r"(?u)\b[a-zA-Z][a-zA-Z0-9_-]+\b",
             sublinear_tf=True,
         )
+        # URLs, link targets and image markers are not topics ("https", "img", "svg").
+        cleaned = [_URL_RE.sub(" ", t) for t in texts]
         try:
-            matrix = vectorizer.fit_transform(texts).tocsr()
+            matrix = vectorizer.fit_transform(cleaned).tocsr()
         except ValueError:  # empty vocabulary (only stop words / numbers)
             return [[] for _ in texts]
         names = vectorizer.get_feature_names_out()

@@ -324,3 +324,50 @@ def _fresh_cache() -> Iterator[None]:
     clear_caches()
     yield
     clear_caches()
+
+
+def test_heading_mid_chunk_does_not_drag_a_code_block_past_the_limit() -> None:
+    text = (
+        "## Intro\n\n" + "intro words " * 30 + "\n\n### Install\n\n```bash\n"
+        + "\n".join(f"run command number {i}" for i in range(20)) + "\n```\n\nAfter text.\n"
+    )
+    chunks = MarkdownChunker(target_size=70, overlap=0, section_level=2).chunk(RawDocument(text=text))
+    for c in chunks:
+        if c.word_count > 70:  # only an atomic block (with its own heading) may exceed
+            body = [ln for ln in c.text.split("\n\n") if not ln.startswith("#")]
+            assert len(body) == 1 and body[0].startswith("```"), c.text
+    assert chunks[0].text.rstrip().endswith("intro words")
+
+
+def test_keywords_ignore_urls_and_are_document_specific(tmp_path: Path) -> None:
+    from src.enrichment.keyword_extractor import KeywordExtractor
+
+    texts = [
+        "[![badge](https://img.shields.io/badge/x.svg)](https://example.org) "
+        "Invoices are reconciled against purchase orders every month.",
+        "Payroll runs weekly; payroll exceptions are escalated to finance.",
+    ]
+    first, second = KeywordExtractor(method="tfidf", top_k=5).keywords_for_texts(texts)
+    noise = {"https", "img", "shields", "svg", "io", "org", "badge"}
+    assert not noise & {w for k in first for w in k.split()}
+    assert any("invoices" in k or "reconciled" in k for k in first)
+    assert any("payroll" in k for k in second)
+
+
+def test_cli_chunk_flags(tmp_path: Path) -> None:
+    import json
+    import subprocess
+
+    path = tmp_path / "guide.md"
+    path.write_text(MARKDOWN)
+    root = Path(__file__).resolve().parents[2]
+    out = subprocess.run(
+        [sys.executable, str(root / "cli.py"), str(path), "--chunk", "--strategy", "recursive",
+         "--chunk-size", "40", "--overlap", "0", "--keywords", "--json"],
+        capture_output=True, text=True, check=True, cwd=root,
+    ).stdout
+    payload = json.loads(out[out.index("{"):])
+    assert payload["strategy"] == "recursive"
+    assert all(c["word_count"] <= 40 for c in payload["chunks"] if "```" not in c["text"])
+    assert any(c["keywords"] for c in payload["chunks"])
+    assert any(c["section_name"] == "Install" for c in payload["chunks"])
