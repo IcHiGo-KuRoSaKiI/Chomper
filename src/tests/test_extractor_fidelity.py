@@ -452,3 +452,123 @@ def test_pptx_image_ids_alt_and_group_positions(deck: Path):
     # Group children are mapped through the group transform to slide points.
     assert images[0]["position"]["x0"] == pytest.approx(72)
     assert images[0]["position"]["y0"] == pytest.approx(72)
+
+
+# ------------------------------------------------------------------------- HTML
+
+pytest.importorskip("bs4", reason="beautifulsoup4 required")
+from src.extractors.html_extractor import HTMLExtractor  # noqa: E402
+
+HTML_PAGE = """<!doctype html>
+<html lang="en"><head><title>Release notes</title>
+<meta name="author" content="Docs Team">
+<meta property="article:published_time" content="2026-03-01T10:00:00Z">
+<style>p { color: red }</style><script>var tracking = 1;</script></head>
+<body>
+<header class="site-header"><a href="/">Home</a></header>
+<nav><ul><li><a href="/docs">Docs</a></li><li><a href="/blog">Blog</a></li></ul></nav>
+<main>
+<h1>Release 2.1</h1>
+<p>This release adds <strong>streaming</strong> and fixes <a href="https://example.com/bug/42">bug 42</a>.</p>
+<div>Short</div><div>blocks</div><span>never</span><span>glue</span>
+<h2>Steps</h2>
+<ol start="3">
+  <li>Install the <code>chomper</code> package</li>
+  <li>Configure:
+    <ul><li>set <em>API key</em></li>
+        <li>set region<ol type="a"><li>us</li><li>eu</li></ol></li></ul>
+  </li>
+  <li value="9">Run it<p>Then check the logs.</p></li>
+</ol>
+<pre><code class="language-python">def f(x):
+    if x:
+        return x * 2
+</code></pre>
+<table><caption>Prices</caption>
+<thead><tr><th>Plan</th><th colspan="2">Cost</th></tr></thead>
+<tr><td rowspan="2">Pro</td><td>monthly</td><td>10 | 12</td></tr>
+<tr><td>yearly</td><td>100</td></tr>
+</table>
+<table><tr><td>no</td><td>header</td></tr><tr><td>row</td><td>two</td></tr></table>
+<blockquote><p>Quoted line.</p></blockquote>
+<figure><img src="charts/q1.png" alt="Q1 chart"><figcaption>Figure 1: Q1</figcaption></figure>
+<dl><dt>Chunk</dt><dd>A piece of text.</dd></dl>
+<p><img src="pixel.gif" width="1" height="1" alt="">Line one<br>Line two</p>
+</main>
+<aside>Related posts</aside>
+<footer>Copyright 2026</footer>
+</body></html>
+"""
+
+
+def test_html_to_markdown_keeps_structure(tmp_path: Path):
+    path = tmp_path / "page.html"
+    path.write_text(HTML_PAGE, encoding="utf-8")
+    raw = HTMLExtractor().extract(str(path))
+    assert raw.text == (
+        "# Release 2.1\n\n"
+        "This release adds **streaming** and fixes [bug 42](https://example.com/bug/42).\n\n"
+        "Short\n\n"
+        "blocks\n\n"
+        "neverglue\n\n"
+        "## Steps\n\n"
+        "3. Install the `chomper` package\n"
+        "4. Configure:\n"
+        "  - set *API key*\n"
+        "  - set region\n"
+        "    a. us\n"
+        "    b. eu\n"
+        "9. Run it\n"
+        "   Then check the logs.\n\n"
+        "```python\n"
+        "def f(x):\n"
+        "    if x:\n"
+        "        return x * 2\n"
+        "```\n\n"
+        "**Prices**\n\n"
+        "| Plan | Cost |  |\n"
+        "| --- | --- | --- |\n"
+        "| Pro | monthly | 10 \\| 12 |\n"
+        "|  | yearly | 100 |\n\n"
+        "|  |  |\n"
+        "| --- | --- |\n"
+        "| no | header |\n"
+        "| row | two |\n\n"
+        "> Quoted line.\n\n"
+        "![Q1 chart](charts/q1.png)\n\n"
+        "*Figure 1: Q1*\n\n"
+        "**Chunk**\n"
+        ": A piece of text.\n\n"
+        "Line one\n"
+        "Line two"
+    )
+    assert raw.metadata["author"] == "Docs Team"
+    assert raw.metadata["publish_date"].startswith("2026-03-01")
+    for chrome in ("Home", "Blog", "Related posts", "Copyright", "tracking", "color: red"):
+        assert chrome not in raw.text
+
+
+def test_html_short_page_without_main_gets_title_and_no_glued_words(tmp_path: Path):
+    path = tmp_path / "short.html"
+    path.write_text(
+        "<html><head><title>Status</title></head><body>"
+        "<div><span>All</span> <span>systems</span></div><div>operational</div>"
+        "<table><tr><td>API</td><td>up</td></tr></table>"
+        "</body></html>",
+        encoding="utf-8",
+    )
+    assert HTMLExtractor().extract(str(path)).text == (
+        "# Status\n\nAll systems\n\noperational\n\n|  |  |\n| --- | --- |\n| API | up |"
+    )
+
+
+def test_html_embedded_data_image_becomes_a_record(tmp_path: Path):
+    import base64
+
+    data = base64.b64encode(_png(200, 120, "purple")).decode()
+    path = tmp_path / "img.html"
+    path.write_text(f'<p>Before <img src="data:image/png;base64,{data}" alt="Logo"> after</p>', encoding="utf-8")
+    raw = HTMLExtractor().extract(str(path))
+    assert raw.text == "Before ![Logo](image:img-1) after"
+    images = collect_images(raw.structure)
+    assert [(img["id"], img["alt"], img["width"]) for img in images] == [("img-1", "Logo", 200)]
