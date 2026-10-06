@@ -33,7 +33,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..pdf_structure.cell_marks import recover_cell_marks
+from ..pdf_structure.cell_marks import recover_cell_marks, recover_mark_columns
 from ..pdf_structure.figures import CAPTION_RE, Caption, find_caption, share_captions
 from ..pdf_structure.lists import list_indent_hints, normalize_markdown_lists
 from .image_utils import image_marker, image_record
@@ -410,10 +410,22 @@ def _render_tables(
     header row back, as the structural chunker does. With ``recover_marks``,
     check marks and crosses that extract as symbol-font junk or not at all are
     restored (see :mod:`src.pdf_structure.cell_marks`).
+
+    Feature matrices whose mark-only columns the model merged or dropped are
+    rebuilt: from the ruled grid when the columns are drawn
+    (:func:`~src.pdf_structure.tables.ruled_grids_for_sparse_matrix`), else
+    from the marks' own positions
+    (:func:`~src.pdf_structure.cell_marks.recover_mark_columns`).
     """
-    from ..pdf_structure.tables import TableRegion, inherit_continuation_headers
+    from ..pdf_structure.tables import (
+        TableRegion,
+        inherit_continuation_headers,
+        render_ruled_pieces,
+        ruled_grids_for_sparse_matrix,
+    )
 
     regions: list[tuple[tuple[int, int], TableRegion]] = []
+    direct: dict[tuple[int, int], str] = {}
     for page_index, chunk in enumerate(chunks):
         layout_boxes = parsed.pages[page_index].boxes if page_index < len(parsed.pages) else []
         page_height = float(pdf_document[page_index].rect.height)
@@ -426,8 +438,26 @@ def _render_tables(
             if not grid:
                 continue
             cells = table.get("cells") or []
+            page = pdf_document[page_index]
             if recover_marks and len(cells) == len(grid):
-                grid = recover_cell_marks(pdf_document[page_index], cells, grid)
+                grid = recover_cell_marks(page, cells, grid)
+            # Sparse feature matrices: the model merges columns that hold no text.
+            pieces = ruled_grids_for_sparse_matrix(
+                page,
+                _box(box),
+                [["" if c is None else str(c) for c in row] for row in grid],
+                recover_cell_marks if recover_marks else None,
+            )
+            if pieces is not None and len(pieces) == 1 and pieces[0].grid is not None:
+                cells, grid = pieces[0].cells or [], pieces[0].grid
+            elif pieces is not None:
+                direct[(page_index, box_index)] = render_ruled_pieces(pieces)
+                continue
+            elif recover_marks and len(cells) == len(grid):
+                # Unruled: mark-only columns the model dropped altogether.
+                rebuilt = recover_mark_columns(page, cells, grid)
+                if rebuilt is not None:
+                    cells, grid = rebuilt
             rows = tuple(tuple("" if c is None else str(c) for c in row) for row in grid)
             columns = max(len(row) for row in rows)
             regions.append((
@@ -445,7 +475,8 @@ def _render_tables(
             ))
     ordered = sorted(regions, key=lambda item: (item[1].page, item[1].bbox[1], item[1].bbox[0]))
     restored = inherit_continuation_headers([region for _, region in ordered])
-    return {key: region.markdown for (key, _), region in zip(ordered, restored, strict=True)}
+    rendered = {key: region.markdown for (key, _), region in zip(ordered, restored, strict=True)}
+    return {**rendered, **direct}
 
 
 def _tidy(markdown: str) -> str:
